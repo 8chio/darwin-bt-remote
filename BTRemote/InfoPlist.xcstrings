@@ -9,6 +9,12 @@
             "state" : "translated",
             "value" : "Bluetooth Remote"
           }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth Remote"
+          }
         }
       }
     },
@@ -21,6 +27,12 @@
             "state" : "new",
             "value" : "Bluetooth Remote"
           }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth Remote"
+          }
         }
       }
     },
@@ -31,6 +43,12 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bluetooth Remote uses Bluetooth to act as a wireless keyboard, mouse, and media remote for your computer, TV, or other devices."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bluetooth Remote는 Bluetooth를 사용해 컴퓨터, TV 또는 다른 기기의 무선 키보드, 마우스 및 미디어 리모컨으로 동작합니다."
           }
         }
       }

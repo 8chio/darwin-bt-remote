@@ -43,9 +43,6 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
             }
-            #if os(macOS)
-                DirectInputShortcutSettingsView()
-            #endif
             Section(header: Text(L10n.Settings.trackpad)) {
                 sensitivityRow(L10n.Settings.trackingSpeed, value: $touchpadSensitivity, range: AppSettings.pointerSensitivityRange)
                 sensitivityRow(L10n.Settings.scrollSpeed, value: $scrollSensitivity, range: AppSettings.scrollSensitivityRange)
@@ -72,6 +69,9 @@ struct SettingsView: View {
             }
             if developerMode, hid.isActive { batterySection }
             resetSection
+            #if os(macOS)
+                DirectInputShortcutSettingsView()
+            #endif
         }
         .confirmationDialog(L10n.Settings.resetConfirm, isPresented: $showReset, titleVisibility: .visible) {
             Button(L10n.Settings.reset, role: .destructive) { _resetAll() }

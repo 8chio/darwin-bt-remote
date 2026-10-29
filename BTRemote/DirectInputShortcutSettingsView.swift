@@ -14,7 +14,6 @@
                     } label: {
                         Text(recorder.isRecording ? String(localized: "shortcut.recording") :
                             (manager.hotkey?.displayString ?? String(localized: "shortcut.none")))
-                            .monospaced()
                     }
                     .disabled(recorder.isRecording)
                     if recorder.isRecording {

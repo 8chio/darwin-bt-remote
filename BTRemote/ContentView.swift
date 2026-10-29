@@ -6,7 +6,6 @@ struct ContentView: View {
     @Environment(\.hid) private var hid
     #if os(macOS)
         @EnvironmentObject private var directInput: DirectInputController
-        @EnvironmentObject private var shortcuts: DirectInputShortcutManager
     #else
         @StateObject private var directInput = DirectInputController()
     #endif
@@ -62,11 +61,6 @@ struct ContentView: View {
             .sheet(isPresented: $showGuide) { guideSheet }
         #if os(macOS)
             .onDisappear { directInput.stop() }
-            .safeAreaInset(edge: .bottom) {
-                if let error = directInput.lastError ?? shortcuts.lastError {
-                    Text(error).font(.caption).foregroundStyle(.red).padding(8)
-                }
-            }
             .frame(minWidth: 480, idealWidth: 560, minHeight: 640, idealHeight: 800)
             .onChange(of: directInput.needsAccessibility) { needs in
                 guard needs else { return }

@@ -46,6 +46,9 @@ struct TrackpadGestureSettingsView: View {
                 gesturePicker(L10n.Gesture.fourFingerTap, selection: $fourFingerTapAction)
             }
         }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
         .navigationTitle(L10n.Gesture.sectionTitle)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
