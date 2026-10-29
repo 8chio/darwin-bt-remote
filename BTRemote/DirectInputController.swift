@@ -2,6 +2,7 @@
     import AppKit
     import CoreGraphics
     import Foundation
+    import os
 
     @MainActor
     final class DirectInputController: ObservableObject {
@@ -9,6 +10,7 @@
         @Published private(set) var lastError: String?
         @Published private(set) var needsAccessibility = false
 
+        private let log = Logger(subsystem: "io.github.jqssun.btremote", category: "DirectInputCapture")
         private var eventTap: CFMachPort?
         private var runLoopSource: CFRunLoopSource?
         private var statusItem: NSStatusItem?
@@ -16,14 +18,19 @@
         private var pressedMouseButtons: MouseButtons = []
         private var modifiers: KeyboardModifiers = []
         private var cursorHidden = false
+        private var shortcutSuppression = DirectInputShortcutSuppression()
+        var toggleHotkey: DirectInputHotkey?
+        var onToggleShortcut: (() -> Void)?
+        var onShortcutKeyUp: ((UInt16) -> Void)?
 
         private var sendKeyboard: ((KeyboardReport) -> Void)?
         private var sendMouse: ((MouseReport) -> Void)?
         private var onRelease: (() -> Void)?
 
         /// capture input and route it to HID backend
-        func start(_ hid: HIDInput) {
+        func start(_ hid: HIDInput, suppressing hotkey: DirectInputHotkey? = nil) {
             start(sendKeyboard: hid.sendKeyboard, sendMouse: hid.sendMouse, onRelease: {})
+            if isCapturing { shortcutSuppression = DirectInputShortcutSuppression(hotkey) }
         }
 
         func start(
@@ -84,24 +91,46 @@
 
             eventTap = tap
             runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-            if let runLoopSource {
-                CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+            guard let runLoopSource else {
+                CFMachPortInvalidate(tap)
+                eventTap = nil
+                lastError = L10n.DirectInput.captureFailedString
+                clearHandlers()
+                onRelease()
+                return
             }
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
-            CGAssociateMouseAndMouseCursorPosition(boolean_t(0))
+            guard CGEvent.tapIsEnabled(tap: tap) else {
+                stop()
+                lastError = L10n.DirectInput.captureFailedString
+                onRelease()
+                return
+            }
+            guard CGAssociateMouseAndMouseCursorPosition(boolean_t(0)) == .success else {
+                stop()
+                lastError = L10n.DirectInput.captureFailedString
+                onRelease()
+                return
+            }
             NSCursor.hide()
             cursorHidden = true
             isCapturing = true
+            log.info("capture started")
             showStatusItem()
         }
 
         func stop() {
+            if isCapturing { log.info("capture stopped; releasing keyboard, mouse and cursor") }
+            isCapturing = false
+            shortcutSuppression = DirectInputShortcutSuppression()
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: false)
             }
             if let runLoopSource {
                 CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
             }
+            if let eventTap { CFMachPortInvalidate(eventTap) }
             eventTap = nil
             runLoopSource = nil
 
@@ -118,7 +147,6 @@
             sendMouse?(.zero)
             clearHandlers()
             hideStatusItem()
-            isCapturing = false
         }
 
         func clearAccessibilityRequest() {
@@ -156,6 +184,7 @@
         }
 
         private func handle(_ event: DirectInputEvent) {
+            guard isCapturing else { return }
             if event.releaseShortcutPressed {
                 onRelease?()
                 stop()
@@ -192,30 +221,68 @@
             sendKeyboard?(KeyboardReport(modifiers: modifiers, keys: Array(pressedKeys).prefix(6).map(\.self)))
         }
 
+        private func intercept(_ input: DirectInputShortcutEvent) {
+            guard isCapturing else { return }
+            if input.type == .keyUp { onShortcutKeyUp?(input.keyCode) }
+            if input.isToggle(hotkey: toggleHotkey) {
+                if let onToggleShortcut { onToggleShortcut() } else { stop() }
+                return
+            }
+            let filtered = shortcutSuppression.filter(type: input.type, keyCode: input.keyCode, flags: input.flags)
+            guard !filtered.swallow else { return }
+            if let event = input.event(flags: filtered.flags) { handle(event) }
+        }
+
         private nonisolated static let eventTapCallback: CGEventTapCallBack = { _, type, cgEvent, userInfo in
-            guard type != .tapDisabledByTimeout, type != .tapDisabledByUserInput else {
-                if let userInfo {
-                    let controller = Unmanaged<DirectInputController>.fromOpaque(userInfo).takeUnretainedValue()
-                    Task { @MainActor in
-                        controller.eventTap.map { CGEvent.tapEnable(tap: $0, enable: true) }
-                    }
+            guard let userInfo else { return nil }
+            let controller = Unmanaged<DirectInputController>.fromOpaque(userInfo).takeUnretainedValue()
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                // Release immediately rather than retaining keys/cursor after capture fails.
+                MainActor.assumeIsolated {
+                    guard controller.isCapturing else { return }
+                    controller.log.error("capture tap disabled; releasing input")
+                    controller.stop()
+                    controller.lastError = L10n.DirectInput.captureFailedString
                 }
                 return nil
             }
-
-            guard let userInfo, let event = DirectInputEvent(type: type, event: cgEvent) else {
-                return nil
-            }
-
-            let controller = Unmanaged<DirectInputController>.fromOpaque(userInfo).takeUnretainedValue()
-            Task { @MainActor in
-                controller.handle(event)
-            }
+            // The tap is installed on the main run loop. Process synchronously so
+            // queued events cannot cross a stop/start boundary or race a Carbon toggle.
+            let input = DirectInputShortcutEvent(type: type, event: cgEvent)
+            MainActor.assumeIsolated { controller.intercept(input) }
             return nil
+        }
+
+    }
+
+    struct DirectInputShortcutEvent: Sendable {
+        let type: CGEventType
+        let keyCode: UInt16
+        let flags: CGEventFlags
+        let isRepeat: Bool
+        private let decoded: DirectInputEvent?
+
+        init(type: CGEventType, event: CGEvent) {
+            self.type = type
+            keyCode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
+            flags = event.flags
+            isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+            decoded = DirectInputEvent(type: type, event: event)
+        }
+
+        func isToggle(hotkey: DirectInputHotkey?) -> Bool {
+            type == .keyDown && !isRepeat && hotkey?.matches(keyCode: keyCode, flags: flags) == true
+        }
+
+        func event(flags: CGEventFlags) -> DirectInputEvent? {
+            guard var decoded else { return nil }
+            decoded.modifiers = KeyboardModifiers(eventFlags: flags)
+            decoded.releaseShortcutPressed = flags.contains(.maskControl) && flags.contains(.maskAlternate)
+            return decoded
         }
     }
 
-    private struct DirectInputEvent: Sendable {
+    struct DirectInputEvent: Sendable {
         enum Kind: Sendable {
             case keyDown(Keycode)
             case keyUp(Keycode)
@@ -226,8 +293,8 @@
         }
 
         let kind: Kind
-        let modifiers: KeyboardModifiers
-        let releaseShortcutPressed: Bool
+        var modifiers: KeyboardModifiers
+        var releaseShortcutPressed: Bool
 
         init?(type: CGEventType, event: CGEvent) {
             let flags = event.flags

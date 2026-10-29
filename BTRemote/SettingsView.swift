@@ -4,6 +4,9 @@ struct SettingsView: View {
     @EnvironmentObject private var lowEnergy: HIDPeripheral
     @EnvironmentObject private var names: DeviceNameStore
     @Environment(\.hid) private var hid
+    #if os(macOS)
+        @EnvironmentObject private var shortcuts: DirectInputShortcutManager
+    #endif
     @State private var showReset = false
     @AppStorage(AppSettings.colorSchemeKey) private var selectedTheme = "system"
     @AppStorage(AppSettings.touchpadSensitivityKey) private var touchpadSensitivity = AppSettings.defaultPointerSensitivity
@@ -40,6 +43,9 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
             }
+            #if os(macOS)
+                DirectInputShortcutSettingsView()
+            #endif
             Section(header: Text(L10n.Settings.trackpad)) {
                 sensitivityRow(L10n.Settings.trackingSpeed, value: $touchpadSensitivity, range: AppSettings.pointerSensitivityRange)
                 sensitivityRow(L10n.Settings.scrollSpeed, value: $scrollSensitivity, range: AppSettings.scrollSensitivityRange)
@@ -85,6 +91,9 @@ struct SettingsView: View {
         if let bundleID = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: bundleID)
         }
+        #if os(macOS)
+            shortcuts.reload()
+        #endif
         hasSeenWelcome = false
     }
 
@@ -134,6 +143,7 @@ struct SettingsView: View {
                 .environmentObject(HIDCentral())
                 .environmentObject(DeviceNameStore())
                 .environmentObject(HIDClassicDevice())
+                .environmentObject(DirectInputShortcutManager())
         #endif
     }
 #endif

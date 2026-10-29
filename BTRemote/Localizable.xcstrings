@@ -2651,6 +2651,261 @@
           }
         }
       }
+    },
+    "shortcut.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direct Input Shortcut"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direct Input 단축키"
+          }
+        }
+      }
+    },
+    "shortcut.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Record a shortcut with Control, Option, or Command and a key. The same shortcut starts and stops Direct Input. Control + Option always releases capture. You can also start from Setup without a shortcut."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Control, Option 또는 Command와 키를 조합하세요. 같은 단축키로 Direct Input을 시작·종료합니다. Control + Option은 항상 비상 종료합니다. 단축키 없이도 설정 화면에서 시작할 수 있습니다."
+          }
+        }
+      }
+    },
+    "shortcut.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Record Shortcut…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "단축키 지정…"
+          }
+        }
+      }
+    },
+    "shortcut.recording": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press shortcut (Esc to cancel)…"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "단축키를 누르세요 (Esc로 취소)…"
+          }
+        }
+      }
+    },
+    "shortcut.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "취소"
+          }
+        }
+      }
+    },
+    "shortcut.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "해제"
+          }
+        }
+      }
+    },
+    "shortcut.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Global shortcut is registered."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전역 단축키가 등록되었습니다."
+          }
+        }
+      }
+    },
+    "shortcut.inactive": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Global shortcut is not registered."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전역 단축키가 등록되지 않았습니다."
+          }
+        }
+      }
+    },
+    "shortcut.requires_key": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a key other than a modifier or Caps Lock."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Modifier와 Caps Lock 이외의 키를 선택하세요."
+          }
+        }
+      }
+    },
+    "shortcut.requires_modifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Include Control, Option, or Command with a key."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키와 함께 Control, Option 또는 Command를 사용하세요."
+          }
+        }
+      }
+    },
+    "shortcut.emergency_conflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Control + Option is reserved for emergency release. Choose another combination."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Control + Option은 비상 종료용입니다. 다른 조합을 선택하세요."
+          }
+        }
+      }
+    },
+    "shortcut.reserved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This combination is reserved by macOS or existing app controls. Choose another shortcut."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS 또는 기존 앱 기능에서 사용하는 조합입니다. 다른 단축키를 선택하세요."
+          }
+        }
+      }
+    },
+    "shortcut.registration_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not register the global shortcut (status %d). It may already be in use by macOS or another app. The previous shortcut is kept."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전역 단축키를 등록하지 못했습니다 (상태 %d). macOS 또는 다른 앱이 사용 중일 수 있습니다. 기존 단축키는 유지됩니다."
+          }
+        }
+      }
+    },
+    "shortcut.no_host": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect a Bluetooth HID host before starting Direct Input."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Direct Input을 시작하기 전에 Bluetooth HID 기기를 연결하세요."
+          }
+        }
+      }
+    },
+    "shortcut.invalid_saved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved shortcut could not be read. Record a new shortcut."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "저장된 단축키를 읽지 못했습니다. 새 단축키를 지정하세요."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

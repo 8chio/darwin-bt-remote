@@ -9,6 +9,7 @@ enum AppSettings {
     static let useServiceChangedKey = "BTRemote.useServiceChanged"
     static let deviceNamesKey = "BTRemote.deviceNames"
     static let hasSeenWelcomeKey = "BTRemote.hasSeenWelcome"
+    static let directInputToggleHotkeyKey = "BTRemote.directInputToggleHotkey"
     static let liveTypingKey = "BTRemote.liveTyping"
     static let remoteModeKey = "BTRemote.remoteMode"
     static let advertisedNameKey = "BTRemote.advertisedName"

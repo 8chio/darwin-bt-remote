@@ -19,6 +19,8 @@ struct BTRemoteApp: App {
         @StateObject private var lowEnergy = HIDPeripheral()
         @StateObject private var central = HIDCentral()
         @StateObject private var classic = HIDClassicDevice()
+        @StateObject private var directInput = DirectInputController()
+        @StateObject private var shortcuts = DirectInputShortcutManager()
         @AppStorage("BTRemote.macTransportMode") private var modeRaw: String = TransportMode.defaultMode.rawValue
     #endif
 
@@ -63,6 +65,8 @@ struct BTRemoteApp: App {
                     .environmentObject(lowEnergy)
                     .environmentObject(central)
                     .environmentObject(classic)
+                    .environmentObject(directInput)
+                    .environmentObject(shortcuts)
                     .environmentObject(deviceNames)
                     .environment(\.macTransport, currentMode)
                     .environment(\.hid, hid)
@@ -79,6 +83,7 @@ struct BTRemoteApp: App {
         }
 
         private func _onAppear() {
+            shortcuts.attach(directInput: directInput, buildHID: { hid })
             switch currentMode {
             case .classic:
                 classic.start()
@@ -89,6 +94,7 @@ struct BTRemoteApp: App {
         }
 
         private func _modeChanged() {
+            directInput.stop()
             // tear down the previously-active backend to prevent race
             lowEnergy.stop()
             classic.stop()
