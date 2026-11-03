@@ -531,6 +531,65 @@ extension L10n {
         }
     }
 
+    /// macOS keyboard-only remote input (the trackpad and mouse stay on the Mac)
+    enum RemoteKeyboard {
+        static var section: LocalizedStringKey {
+            "remote_keyboard.section"
+        }
+
+        static var toggle: LocalizedStringKey {
+            "remote_keyboard.toggle"
+        }
+
+        static var footer: LocalizedStringKey {
+            "remote_keyboard.footer"
+        }
+
+        static var deviceConnected: LocalizedStringKey {
+            "remote_keyboard.device_connected"
+        }
+
+        static var target: LocalizedStringKey {
+            "remote_keyboard.target"
+        }
+
+        static var targetMac: LocalizedStringKey {
+            "remote_keyboard.target_mac"
+        }
+
+        static var targetRemote: LocalizedStringKey {
+            "remote_keyboard.target_remote"
+        }
+
+        static var shortcut: LocalizedStringKey {
+            "remote_keyboard.shortcut"
+        }
+
+        static var shortcutUnset: LocalizedStringKey {
+            "remote_keyboard.shortcut_unset"
+        }
+
+        static var emergencyRelease: LocalizedStringKey {
+            "remote_keyboard.emergency_release"
+        }
+
+        static var languageHelpTitle: LocalizedStringKey {
+            "remote_keyboard.language_help_title"
+        }
+
+        static var languageHelp: LocalizedStringKey {
+            "remote_keyboard.language_help"
+        }
+
+        static var statusTitleString: String {
+            String(localized: "remote_keyboard.status_title")
+        }
+
+        static var returnToMacString: String {
+            String(localized: "remote_keyboard.return_to_mac")
+        }
+    }
+
     enum Mouse {
         static var leftButton: LocalizedStringKey {
             "mouse.button.left"

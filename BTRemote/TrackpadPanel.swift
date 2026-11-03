@@ -10,9 +10,6 @@ struct TrackpadPanel: View {
     @AppStorage(AppSettings.pinchGestureActionKey) private var pinchActionRaw = TrackpadGestureAction.zoom.rawValue
     @AppStorage(AppSettings.rotationGestureActionKey) private var rotateActionRaw = TrackpadGestureAction.rotateRight.rawValue
     @State private var activeButtons: MouseButtons = []
-    #if os(macOS)
-        @State private var dragOffset: CGSize = .zero
-    #endif
 
     var body: some View {
         VStack(spacing: cellGap) {
@@ -60,22 +57,6 @@ struct TrackpadPanel: View {
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        #if os(macOS)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        let dx = HIDInput.clamp((value.translation.width - dragOffset.width) * touchpadSensitivity)
-                        let dy = HIDInput.clamp((value.translation.height - dragOffset.height) * touchpadSensitivity)
-                        dragOffset = value.translation
-                        hid.sendMouse(MouseReport(buttons: activeButtons, dX: dx, dY: dy))
-                    }
-                    .onEnded { _ in
-                        dragOffset = .zero
-                        hid.sendMouse(MouseReport(buttons: activeButtons))
-                    }
-            )
-        #endif
     }
 
     private func handlePinchZoom(delta: CGFloat) {

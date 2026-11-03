@@ -17,36 +17,52 @@ struct ClassicKeyboardView: View {
     }
 
     private var editor: some View {
-        GeometryReader { geo in
-            if geo.size.width > geo.size.height {
-                HStack(spacing: 12) {
+        #if os(macOS)
+            // The Mac trackpad stays local; no remote trackpad panel.
+            VStack(spacing: 12) {
+                inputField
+                keyPanel
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding()
+            .onChange(of: liveTyping) { _ in clear() }
+        #else
+            touchEditor
+        #endif
+    }
+
+    #if os(iOS)
+        private var touchEditor: some View {
+            GeometryReader { geo in
+                if geo.size.width > geo.size.height {
+                    HStack(spacing: 12) {
+                        VStack(spacing: 12) {
+                            inputField
+                            keyPanel
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity)
+                        TrackpadPanel(hid: hid).frame(width: geo.size.width * 0.42)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
                     VStack(spacing: 12) {
                         inputField
                         keyPanel
-                        Spacer(minLength: 0)
+                        TrackpadPanel(hid: hid).frame(maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
-                    TrackpadPanel(hid: hid).frame(width: geo.size.width * 0.42)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                VStack(spacing: 12) {
-                    inputField
-                    keyPanel
-                    TrackpadPanel(hid: hid).frame(maxHeight: .infinity)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-        }
-        .padding()
-        .onChange(of: liveTyping) { _ in clear() }
-        #if os(iOS)
+            .padding()
+            .onChange(of: liveTyping) { _ in clear() }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) { accessoryBar }
             }
-        #endif
-    }
+        }
+    #endif
 
     @ViewBuilder
     private var accessoryBar: some View {

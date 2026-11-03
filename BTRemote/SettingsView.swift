@@ -43,16 +43,17 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
             }
-            Section(header: Text(L10n.Settings.trackpad)) {
-                sensitivityRow(L10n.Settings.trackingSpeed, value: $touchpadSensitivity, range: AppSettings.pointerSensitivityRange)
-                sensitivityRow(L10n.Settings.scrollSpeed, value: $scrollSensitivity, range: AppSettings.scrollSensitivityRange)
-                NavigationLink {
-                    TrackpadGestureSettingsView()
-                } label: {
-                    Label(L10n.Gesture.sectionTitle, systemImage: "hand.draw")
-                }
-            }
             #if os(iOS)
+                // Remote trackpad settings; the Mac keeps its own trackpad and mouse.
+                Section(header: Text(L10n.Settings.trackpad)) {
+                    sensitivityRow(L10n.Settings.trackingSpeed, value: $touchpadSensitivity, range: AppSettings.pointerSensitivityRange)
+                    sensitivityRow(L10n.Settings.scrollSpeed, value: $scrollSensitivity, range: AppSettings.scrollSensitivityRange)
+                    NavigationLink {
+                        TrackpadGestureSettingsView()
+                    } label: {
+                        Label(L10n.Gesture.sectionTitle, systemImage: "hand.draw")
+                    }
+                }
                 Section(header: Text(L10n.Settings.connection), footer: Text(L10n.Settings.autoAdvertiseHint)) {
                     Toggle(L10n.Settings.autoAdvertise, isOn: $autoAdvertise)
                 }

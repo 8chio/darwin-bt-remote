@@ -17,6 +17,7 @@ struct SetupView: View {
     @EnvironmentObject private var directInput: DirectInputController
     #if os(macOS)
         @EnvironmentObject private var classic: HIDClassicDevice
+        @EnvironmentObject private var shortcuts: DirectInputShortcutManager
         @AppStorage("BTRemote.macTransportMode") private var modeRaw: String = TransportMode.defaultMode.rawValue
     #endif
 
@@ -37,7 +38,7 @@ struct SetupView: View {
                     .formStyle(.grouped)
                     .navigationTitle(L10n.App.title)
             }
-            .onDisappear { directInput.stop() }
+            // Switching tabs with the Mac trackpad must not end remote keyboard mode.
             .onChange(of: hid.isActive) { isActive in
                 if !isActive { directInput.stop() }
             }
@@ -322,9 +323,26 @@ struct SetupView: View {
 
     #if os(macOS)
         private var directInputSection: some View {
-            Section(header: Text(L10n.DirectInput.section), footer: Text(L10n.DirectInput.releaseHint)) {
+            Section(header: Text(L10n.RemoteKeyboard.section), footer: Text(L10n.RemoteKeyboard.footer)) {
                 Toggle(isOn: directInputBinding) {
-                    Label(L10n.DirectInput.toggle, systemImage: "rectangle.and.hand.point.up.left")
+                    Label(L10n.RemoteKeyboard.toggle, systemImage: "keyboard")
+                }
+                .disabled(!hid.isConnected && !directInput.isCapturing)
+                row(L10n.RemoteKeyboard.deviceConnected, Text(hid.isConnected ? L10n.Value.yes : L10n.Value.no))
+                row(
+                    L10n.RemoteKeyboard.target,
+                    Text(directInput.isCapturing ? L10n.RemoteKeyboard.targetRemote : L10n.RemoteKeyboard.targetMac)
+                )
+                row(
+                    L10n.RemoteKeyboard.shortcut,
+                    shortcuts.hotkey.map { Text(verbatim: $0.displayString) } ?? Text(L10n.RemoteKeyboard.shortcutUnset)
+                )
+                row(L10n.RemoteKeyboard.emergencyRelease, Text(verbatim: "⌃ + ⌥"))
+                DisclosureGroup(L10n.RemoteKeyboard.languageHelpTitle) {
+                    Text(L10n.RemoteKeyboard.languageHelp)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let lastError = directInput.lastError {
                     Text(verbatim: lastError)
@@ -440,6 +458,7 @@ private extension KeyboardLEDs {
                 .environmentObject(DeviceNameStore())
                 .environmentObject(HIDClassicDevice())
                 .environmentObject(DirectInputController())
+                .environmentObject(DirectInputShortcutManager())
         #endif
     }
 #endif

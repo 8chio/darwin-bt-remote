@@ -4,74 +4,53 @@
     import Foundation
     import os
 
+    /// Keyboard-only capture: the Mac trackpad and mouse are never tapped, hidden, or forwarded.
     @MainActor
     final class DirectInputController: ObservableObject {
         @Published private(set) var isCapturing = false
         @Published private(set) var lastError: String?
         @Published private(set) var needsAccessibility = false
 
+        /// Pointer events are deliberately absent so clicks, drags, scrolls and gestures stay on the Mac.
+        nonisolated static let capturedEventTypes: [CGEventType] = [.keyDown, .keyUp, .flagsChanged]
+        nonisolated static let eventMask: CGEventMask = capturedEventTypes.reduce(CGEventMask(0)) { result, type in
+            result | (CGEventMask(1) << CGEventMask(type.rawValue))
+        }
+
         private let log = Logger(subsystem: "io.github.jqssun.btremote", category: "DirectInputCapture")
         private var eventTap: CFMachPort?
         private var runLoopSource: CFRunLoopSource?
         private var statusItem: NSStatusItem?
-        private var pressedKeys: Set<Keycode> = []
-        private var pressedMouseButtons: MouseButtons = []
-        private var modifiers: KeyboardModifiers = []
-        private var cursorHidden = false
+        private var statusItemTarget: DirectInputStatusItemTarget?
+        private var router: DirectInputKeyboardRouter?
         private var shortcutSuppression = DirectInputShortcutSuppression()
         var toggleHotkey: DirectInputHotkey?
         var onToggleShortcut: (() -> Void)?
         var onShortcutKeyUp: ((UInt16) -> Void)?
 
-        private var sendKeyboard: ((KeyboardReport) -> Void)?
-        private var sendMouse: ((MouseReport) -> Void)?
         private var onRelease: (() -> Void)?
 
-        /// capture input and route it to HID backend
+        /// capture keyboard input and route it to HID backend
         func start(_ hid: HIDInput, suppressing hotkey: DirectInputHotkey? = nil) {
-            start(sendKeyboard: hid.sendKeyboard, sendMouse: hid.sendMouse, onRelease: {})
+            start(sendKeyboard: hid.sendKeyboard, onRelease: {})
             if isCapturing { shortcutSuppression = DirectInputShortcutSuppression(hotkey) }
         }
 
-        func start(
-            sendKeyboard: @escaping (KeyboardReport) -> Void,
-            sendMouse: @escaping (MouseReport) -> Void,
-            onRelease: @escaping () -> Void
-        ) {
+        func start(sendKeyboard: @escaping (KeyboardReport) -> Void, onRelease: @escaping () -> Void) {
             stop()
-
-            self.sendKeyboard = sendKeyboard
-            self.sendMouse = sendMouse
-            self.onRelease = onRelease
-            pressedKeys.removeAll()
-            pressedMouseButtons = []
-            modifiers = []
             lastError = nil
+
+            // Any failure leaves the Mac keyboard untouched and the remote host neutral.
+            func fail(_ reason: String) {
+                log.error("capture not started: \(reason, privacy: .public)")
+                sendKeyboard(.zero)
+                onRelease()
+            }
 
             guard AccessibilityPermission.isTrusted else {
                 needsAccessibility = true
-                clearHandlers()
-                onRelease()
+                fail("accessibility not trusted")
                 return
-            }
-
-            let mask = [
-                CGEventType.keyDown,
-                .keyUp,
-                .flagsChanged,
-                .mouseMoved,
-                .leftMouseDown,
-                .leftMouseUp,
-                .leftMouseDragged,
-                .rightMouseDown,
-                .rightMouseUp,
-                .rightMouseDragged,
-                .otherMouseDown,
-                .otherMouseUp,
-                .otherMouseDragged,
-                .scrollWheel
-            ].reduce(CGEventMask(0)) { result, type in
-                result | (CGEventMask(1) << CGEventMask(type.rawValue))
             }
 
             let refcon = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -79,13 +58,12 @@
                 tap: .cgSessionEventTap,
                 place: .headInsertEventTap,
                 options: .defaultTap,
-                eventsOfInterest: mask,
+                eventsOfInterest: Self.eventMask,
                 callback: DirectInputController.eventTapCallback,
                 userInfo: refcon
             ) else {
                 lastError = L10n.DirectInput.captureFailedString
-                clearHandlers()
-                onRelease()
+                fail("event tap unavailable")
                 return
             }
 
@@ -95,33 +73,26 @@
                 CFMachPortInvalidate(tap)
                 eventTap = nil
                 lastError = L10n.DirectInput.captureFailedString
-                clearHandlers()
-                onRelease()
+                fail("run loop source unavailable")
                 return
             }
+            router = DirectInputKeyboardRouter(send: sendKeyboard)
+            self.onRelease = onRelease
             CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
             guard CGEvent.tapIsEnabled(tap: tap) else {
                 stop()
                 lastError = L10n.DirectInput.captureFailedString
-                onRelease()
+                fail("event tap disabled")
                 return
             }
-            guard CGAssociateMouseAndMouseCursorPosition(boolean_t(0)) == .success else {
-                stop()
-                lastError = L10n.DirectInput.captureFailedString
-                onRelease()
-                return
-            }
-            NSCursor.hide()
-            cursorHidden = true
             isCapturing = true
-            log.info("capture started")
+            log.info("keyboard capture started")
             showStatusItem()
         }
 
         func stop() {
-            if isCapturing { log.info("capture stopped; releasing keyboard, mouse and cursor") }
+            if isCapturing { log.info("keyboard capture stopped; releasing remote keys") }
             isCapturing = false
             shortcutSuppression = DirectInputShortcutSuppression()
             if let eventTap {
@@ -134,18 +105,9 @@
             eventTap = nil
             runLoopSource = nil
 
-            if cursorHidden {
-                NSCursor.unhide()
-                cursorHidden = false
-            }
-            CGAssociateMouseAndMouseCursorPosition(boolean_t(1))
-
-            pressedKeys.removeAll()
-            pressedMouseButtons = []
-            modifiers = []
-            sendKeyboard?(.zero)
-            sendMouse?(.zero)
-            clearHandlers()
+            router?.reset()
+            router = nil
+            onRelease = nil
             hideStatusItem()
         }
 
@@ -153,13 +115,7 @@
             needsAccessibility = false
         }
 
-        private func clearHandlers() {
-            sendKeyboard = nil
-            sendMouse = nil
-            onRelease = nil
-        }
-
-        /// menu bar warning shown while capturing, since the cursor is hidden and the window is unreachable
+        /// menu bar indicator while the keyboard goes to the remote device; clickable with the Mac trackpad
         private func showStatusItem() {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             if let button = item.button {
@@ -169,10 +125,26 @@
                 button.image = icon
                 button.imagePosition = .imageLeading
                 button.attributedTitle = NSAttributedString(
-                    string: "  " + L10n.DirectInput.releaseHintString,
+                    string: "  " + L10n.RemoteKeyboard.statusTitleString,
                     attributes: [.foregroundColor: NSColor.systemRed]
                 )
             }
+            let target = DirectInputStatusItemTarget { [weak self] in
+                guard let self, isCapturing else { return }
+                onRelease?()
+                stop()
+            }
+            let menu = NSMenu()
+            menu.addItem(NSMenuItem(title: L10n.DirectInput.releaseHintString, action: nil, keyEquivalent: ""))
+            let release = NSMenuItem(
+                title: L10n.RemoteKeyboard.returnToMacString,
+                action: #selector(DirectInputStatusItemTarget.fire),
+                keyEquivalent: ""
+            )
+            release.target = target
+            menu.addItem(release)
+            item.menu = menu
+            statusItemTarget = target
             statusItem = item
         }
 
@@ -181,44 +153,17 @@
                 NSStatusBar.system.removeStatusItem(statusItem)
             }
             statusItem = nil
+            statusItemTarget = nil
         }
 
         private func handle(_ event: DirectInputEvent) {
-            guard isCapturing else { return }
+            guard isCapturing, let router else { return }
             if event.releaseShortcutPressed {
                 onRelease?()
                 stop()
                 return
             }
-
-            modifiers = event.modifiers
-
-            switch event.kind {
-            case let .keyDown(key):
-                pressedKeys.insert(key)
-                sendKeyboardReport()
-            case let .keyUp(key):
-                pressedKeys.remove(key)
-                sendKeyboardReport()
-            case .flagsChanged:
-                sendKeyboardReport()
-            case let .mouseMove(dx, dy):
-                sendMouse?(MouseReport(buttons: pressedMouseButtons, dX: dx, dY: dy))
-            case let .mouseButton(button, isDown):
-                if isDown {
-                    pressedMouseButtons.insert(button)
-                } else {
-                    pressedMouseButtons.remove(button)
-                }
-                sendMouse?(MouseReport(buttons: pressedMouseButtons))
-            case let .scroll(wheel):
-                sendMouse?(MouseReport(buttons: pressedMouseButtons, wheel: wheel))
-                sendMouse?(MouseReport(buttons: pressedMouseButtons))
-            }
-        }
-
-        private func sendKeyboardReport() {
-            sendKeyboard?(KeyboardReport(modifiers: modifiers, keys: Array(pressedKeys).prefix(6).map(\.self)))
+            router.handle(event)
         }
 
         private func intercept(_ input: DirectInputShortcutEvent) {
@@ -237,7 +182,7 @@
             guard let userInfo else { return nil }
             let controller = Unmanaged<DirectInputController>.fromOpaque(userInfo).takeUnretainedValue()
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                // Release immediately rather than retaining keys/cursor after capture fails.
+                // Release immediately rather than retaining keys after capture fails.
                 MainActor.assumeIsolated {
                     guard controller.isCapturing else { return }
                     controller.log.error("capture tap disabled; releasing input")
@@ -246,6 +191,8 @@
                 }
                 return nil
             }
+            // Never consume anything outside the keyboard mask (pointer input stays on the Mac).
+            guard DirectInputController.capturedEventTypes.contains(type) else { return Unmanaged.passUnretained(cgEvent) }
             // The tap is installed on the main run loop. Process synchronously so
             // queued events cannot cross a stop/start boundary or race a Carbon toggle.
             let input = DirectInputShortcutEvent(type: type, event: cgEvent)
@@ -253,6 +200,123 @@
             return nil
         }
 
+    }
+
+    @MainActor
+    private final class DirectInputStatusItemTarget: NSObject {
+        private let action: () -> Void
+
+        init(_ action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func fire() {
+            action()
+        }
+    }
+
+    /// Keyboard HID state for one capture session; it only ever emits keyboard reports.
+    @MainActor
+    final class DirectInputKeyboardRouter {
+        typealias Schedule = @MainActor (UInt64, @escaping @MainActor () -> Void) -> @MainActor () -> Void
+
+        /// macOS reports one flagsChanged per Caps Lock press and no key-up, so the remote
+        /// press is synthesized as a short tap. Spacing keeps the BLE backend from
+        /// coalescing the press into the release.
+        static let capsLockHoldNanoseconds: UInt64 = 60_000_000
+
+        private let send: (KeyboardReport) -> Void
+        private let schedule: Schedule
+        private let now: @MainActor () -> UInt64
+        private(set) var pressedKeys: Set<Keycode> = []
+        private(set) var modifiers: KeyboardModifiers = []
+        private(set) var isCapsLockHeld = false
+        private var capsLockFilter = DirectInputCapsLockFilter()
+        private var cancelCapsLockRelease: (@MainActor () -> Void)?
+
+        init(
+            send: @escaping (KeyboardReport) -> Void,
+            schedule: @escaping Schedule = DirectInputKeyboardRouter.scheduleOnMain,
+            now: @escaping @MainActor () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+        ) {
+            self.send = send
+            self.schedule = schedule
+            self.now = now
+        }
+
+        var report: KeyboardReport {
+            let keys = pressedKeys.filter { $0 != .capsLock }.sorted { $0.rawValue < $1.rawValue }
+            return KeyboardReport(modifiers: modifiers, keys: Array(((isCapsLockHeld ? [.capsLock] : []) + keys).prefix(6)))
+        }
+
+        func handle(_ event: DirectInputEvent) {
+            modifiers = event.modifiers
+            switch event.kind {
+            case let .keyDown(key):
+                pressedKeys.insert(key)
+            case let .keyUp(key):
+                pressedKeys.remove(key)
+            case .flagsChanged:
+                break
+            case let .capsLock(isOn):
+                guard capsLockFilter.accept(isOn: isOn, at: now()) else { return }
+                tapCapsLock()
+                return
+            }
+            send(report)
+        }
+
+        /// Sends one neutral report so nothing stays pressed on the remote host.
+        func reset() {
+            cancelCapsLockRelease?()
+            cancelCapsLockRelease = nil
+            isCapsLockHeld = false
+            pressedKeys.removeAll()
+            modifiers = []
+            capsLockFilter = DirectInputCapsLockFilter()
+            send(.zero)
+        }
+
+        private func tapCapsLock() {
+            if isCapsLockHeld { releaseCapsLock() }
+            isCapsLockHeld = true
+            send(report)
+            cancelCapsLockRelease = schedule(Self.capsLockHoldNanoseconds) { [weak self] in self?.releaseCapsLock() }
+        }
+
+        private func releaseCapsLock() {
+            cancelCapsLockRelease?()
+            cancelCapsLockRelease = nil
+            guard isCapsLockHeld else { return }
+            isCapsLockHeld = false
+            send(report)
+        }
+
+        static func scheduleOnMain(_ nanoseconds: UInt64, _ work: @escaping @MainActor () -> Void) -> @MainActor () -> Void {
+            let task = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: nanoseconds)
+                guard !Task.isCancelled else { return }
+                work()
+            }
+            return { task.cancel() }
+        }
+    }
+
+    /// One physical Caps Lock press may surface as a repeated flagsChanged with the same
+    /// lock state (duplicate delivery or a release echo). Those are dropped; a state change
+    /// or a press after the window always counts.
+    struct DirectInputCapsLockFilter {
+        static let duplicateWindowNanoseconds: UInt64 = 250_000_000
+
+        private var last: (isOn: Bool, time: UInt64)?
+
+        mutating func accept(isOn: Bool, at time: UInt64) -> Bool {
+            if let last, last.isOn == isOn, time >= last.time, time - last.time < Self.duplicateWindowNanoseconds {
+                return false
+            }
+            last = (isOn, time)
+            return true
+        }
     }
 
     struct DirectInputShortcutEvent: Sendable {
@@ -287,10 +351,11 @@
             case keyDown(Keycode)
             case keyUp(Keycode)
             case flagsChanged
-            case mouseMove(Int8, Int8)
-            case mouseButton(MouseButtons, Bool)
-            case scroll(Int8)
+            /// physical Caps Lock press; `isOn` is the Mac lock state reported with it
+            case capsLock(isOn: Bool)
         }
+
+        static let capsLockVirtualKey: UInt16 = 0x39
 
         let kind: Kind
         var modifiers: KeyboardModifiers
@@ -310,37 +375,14 @@
                 guard let key = Keycode(macVirtualKey: UInt16(event.getIntegerValueField(.keyboardEventKeycode))) else { return nil }
                 kind = .keyUp(key)
             case .flagsChanged:
-                kind = .flagsChanged
-            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-                let dx = Self.clampInt8(event.getIntegerValueField(.mouseEventDeltaX))
-                let dy = Self.clampInt8(event.getIntegerValueField(.mouseEventDeltaY))
-                guard dx != 0 || dy != 0 else { return nil }
-                kind = .mouseMove(dx, dy)
-            case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
-                guard let button = Self.mouseButton(for: type) else { return nil }
-                kind = .mouseButton(button.0, button.1)
-            case .scrollWheel:
-                let wheel = Self.clampInt8(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
-                guard wheel != 0 else { return nil }
-                kind = .scroll(wheel)
+                if UInt16(event.getIntegerValueField(.keyboardEventKeycode)) == Self.capsLockVirtualKey {
+                    kind = .capsLock(isOn: flags.contains(.maskAlphaShift))
+                } else {
+                    kind = .flagsChanged
+                }
             default:
+                // Pointer and other events are never decoded, so they cannot reach the HID path.
                 return nil
-            }
-        }
-
-        private static func clampInt8(_ value: Int64) -> Int8 {
-            Int8(max(-127, min(127, Int(value))))
-        }
-
-        private static func mouseButton(for type: CGEventType) -> (MouseButtons, Bool)? {
-            switch type {
-            case .leftMouseDown: (.left, true)
-            case .leftMouseUp: (.left, false)
-            case .rightMouseDown: (.right, true)
-            case .rightMouseUp: (.right, false)
-            case .otherMouseDown: (.middle, true)
-            case .otherMouseUp: (.middle, false)
-            default: nil
             }
         }
     }

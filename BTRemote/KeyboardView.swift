@@ -7,6 +7,15 @@ enum KeyboardPage: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
 
+    /// The Mac keeps its own trackpad, so the remote trackpad page is iOS-only.
+    static var available: [KeyboardPage] {
+        #if os(macOS)
+            allCases.filter { $0 != .trackpad }
+        #else
+            allCases
+        #endif
+    }
+
     var title: LocalizedStringKey {
         switch self {
         case .fullKeyboard: L10n.Keyboard.fullKeyboard
@@ -38,6 +47,12 @@ struct KeyboardView: View {
                 contentView
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear {
+                // A trackpad page saved by an older build falls back to the keyboard on macOS.
+                if !KeyboardPage.available.contains(where: { $0.rawValue == selectedPage }) {
+                    selectedPage = KeyboardPage.fullKeyboard.rawValue
+                }
+            }
         } else {
             NotConnectedView(icon: "keyboard", goToSetup: goToSetup)
         }
@@ -45,7 +60,7 @@ struct KeyboardView: View {
 
     private var pageSwitcher: some View {
         HStack(spacing: 6) {
-            ForEach(KeyboardPage.allCases) { page in
+            ForEach(KeyboardPage.available) { page in
                 Button {
                     Haptics.tap()
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -97,8 +112,10 @@ struct KeyboardView: View {
         switch selectedPage {
         case 0:
             FullKeyboardView()
-        case 1:
-            StandaloneTrackpadView(hid: hid)
+        #if os(iOS)
+            case 1:
+                StandaloneTrackpadView(hid: hid)
+        #endif
         case 2:
             ClassicKeyboardView()
         default:

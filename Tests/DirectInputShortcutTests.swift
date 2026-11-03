@@ -9,11 +9,46 @@ enum L10n {
         static let captureFailedString = "Capture failed"
         static let releaseHintString = "Control + Option releases capture"
     }
+    enum RemoteKeyboard {
+        static let statusTitleString = "Keyboard → Device"
+        static let returnToMacString = "Return Keyboard to Mac"
+    }
 }
 struct HIDInput {
     var sendKeyboard: (KeyboardReport) -> Void = { _ in }
     var sendMouse: (MouseReport) -> Void = { _ in }
     var isConnected = true
+}
+
+@MainActor
+final class ReportLog {
+    var keyboard: [KeyboardReport] = []
+    var mouse: [MouseReport] = []
+    var hid: HIDInput {
+        HIDInput(sendKeyboard: { report in MainActor.assumeIsolated { self.keyboard.append(report) } },
+                 sendMouse: { report in MainActor.assumeIsolated { self.mouse.append(report) } })
+    }
+}
+
+/// Deterministic clock and release scheduler for the Caps Lock tap.
+@MainActor
+final class ManualClock {
+    var now: UInt64 = 10_000_000_000
+    var delays: [UInt64] = []
+    var cancels = 0
+    private var work: (@MainActor () -> Void)?
+    var hasPending: Bool { work != nil }
+    func schedule(_ delay: UInt64, _ work: @escaping @MainActor () -> Void) -> @MainActor () -> Void {
+        delays.append(delay)
+        self.work = work
+        return { self.cancels += 1; self.work = nil }
+    }
+    func fire() {
+        let pending = work
+        work = nil
+        pending?()
+    }
+    func advance(milliseconds: UInt64) { now += milliseconds * 1_000_000 }
 }
 
 @MainActor
@@ -80,6 +115,10 @@ struct DirectInputShortcutTests {
         precondition(roundTrip == binding)
         testSuppression(binding)
         testEventPaths(binding)
+        testKeyboardOnlyCapture()
+        testKeyboardRouter()
+        testCapsLock()
+        testCaptureStartFailure()
 
         let defaults = MemoryPreferences()
         let monitor = TestMonitor(), capture = TestCapture()
@@ -206,14 +245,162 @@ struct DirectInputShortcutTests {
         guard let letter = DirectInputEvent(type: .keyDown, event: event), case .keyDown(.a) = letter.kind else { preconditionFailure() }
         event.flags = [.maskControl, .maskAlternate]
         precondition(DirectInputEvent(type: .flagsChanged, event: event)?.releaseShortcutPressed == true)
+        event.flags = []
+        event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        precondition(DirectInputEvent(type: .keyDown, event: event) == nil) // auto-repeat is not a new press
+        print("PASS: captured shortcut filtering, starting chord suppression, A/Ctrl+Space/emergency/auto-repeat decoders")
+    }
+
+    /// UC-001: only keyboard events are tapped; pointer events are never decoded or consumed.
+    static func testKeyboardOnlyCapture() {
+        let pointerTypes: [CGEventType] = [
+            .mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp,
+            .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged, .scrollWheel,
+            .tabletPointer, .tabletProximity
+        ]
+        let mask = DirectInputController.eventMask
+        for type in [CGEventType.keyDown, .keyUp, .flagsChanged] {
+            precondition(mask & (CGEventMask(1) << CGEventMask(type.rawValue)) != 0)
+        }
+        for type in pointerTypes {
+            precondition(mask & (CGEventMask(1) << CGEventMask(type.rawValue)) == 0, "pointer type \(type.rawValue) in mask")
+            precondition(!DirectInputController.capturedEventTypes.contains(type))
+        }
+        // Gesture/magnify/swipe event types (29-31) are not in the mask either.
+        for raw: UInt32 in [29, 30, 31] { precondition(mask & (CGEventMask(1) << CGEventMask(raw)) == 0) }
+        precondition(mask == (CGEventMask(1) << 10 | CGEventMask(1) << 11 | CGEventMask(1) << 12))
+
         let mouse = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: .zero, mouseButton: .left)!
         mouse.setIntegerValueField(.mouseEventDeltaX, value: 8)
         mouse.setIntegerValueField(.mouseEventDeltaY, value: -5)
-        guard let move = DirectInputEvent(type: .mouseMoved, event: mouse), case .mouseMove(8, -5) = move.kind else { preconditionFailure() }
-        guard let click = DirectInputEvent(type: .leftMouseDown, event: mouse), case .mouseButton(.left, true) = click.kind else { preconditionFailure() }
-        guard let release = DirectInputEvent(type: .leftMouseUp, event: mouse), case .mouseButton(.left, false) = release.kind else { preconditionFailure() }
+        for type in pointerTypes { precondition(DirectInputEvent(type: type, event: mouse) == nil) }
         let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 2, wheel2: 0, wheel3: 0)!
-        guard let scroll = DirectInputEvent(type: .scrollWheel, event: wheel), case .scroll(2) = scroll.kind else { preconditionFailure() }
-        print("PASS: captured shortcut filtering, starting chord suppression, existing A/Ctrl+Space/emergency/mouse/click/scroll decoders")
+        precondition(DirectInputEvent(type: .scrollWheel, event: wheel) == nil)
+        precondition(DirectInputShortcutEvent(type: .leftMouseDown, event: mouse).event(flags: []) == nil)
+        print("PASS: keyboard-only event mask; mouse move/click/drag/scroll/tablet/gesture never decoded")
+    }
+
+    /// Key press/release, modifiers and neutral reset; the router has no mouse output at all.
+    @MainActor
+    static func testKeyboardRouter() {
+        let log = ReportLog(), clock = ManualClock()
+        let router = DirectInputKeyboardRouter(send: log.hid.sendKeyboard, schedule: clock.schedule, now: { clock.now })
+        let a = keyEvent(.keyDown, 0x00, flags: .maskShift)
+        router.handle(a)
+        precondition(log.keyboard.last == KeyboardReport(modifiers: .leftShift, keys: [.a]))
+        router.handle(keyEvent(.keyDown, 0x01, flags: [.maskShift, .maskCommand]))
+        precondition(log.keyboard.last == KeyboardReport(modifiers: [.leftShift, .leftGUI], keys: [.a, .s]))
+        router.handle(keyEvent(.keyUp, 0x00, flags: [.maskShift, .maskCommand]))
+        precondition(log.keyboard.last == KeyboardReport(modifiers: [.leftShift, .leftGUI], keys: [.s]))
+        // Modifier-only change (Control/Option/Shift/Command) is forwarded as a flagsChanged report.
+        router.handle(keyEvent(.flagsChanged, 0x3B, flags: [.maskControl]))
+        precondition(log.keyboard.last == KeyboardReport(modifiers: .leftCtrl, keys: [.s]))
+        // More than six keys never overflows the boot report.
+        for code: UInt16 in [0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08] { router.handle(keyEvent(.keyDown, code, flags: [])) }
+        precondition(log.keyboard.last!.keys.count == 6 && log.keyboard.last!.data.count == 8)
+        // Stop/disconnect/termination path: one neutral report and empty state.
+        router.reset()
+        precondition(log.keyboard.last == .zero && log.keyboard.last!.data == Data(repeating: 0, count: 8))
+        precondition(router.pressedKeys.isEmpty && router.modifiers.isEmpty && !router.isCapsLockHeld)
+        precondition(log.mouse.isEmpty)
+        print("PASS: router key down/up, modifiers, 6-key limit, neutral reset, no mouse reports")
+    }
+
+    /// UC-003: Caps Lock flagsChanged -> HID 0x39 press, timed release, duplicate and stuck-key protection.
+    @MainActor
+    static func testCapsLock() {
+        // macOS delivers Caps Lock as flagsChanged keycode 0x39 with the new lock state.
+        let on = keyEvent(.flagsChanged, 0x39, flags: .maskAlphaShift)
+        let off = keyEvent(.flagsChanged, 0x39, flags: [])
+        guard case .capsLock(isOn: true) = on.kind, case .capsLock(isOn: false) = off.kind else { preconditionFailure() }
+        precondition(on.modifiers.isEmpty) // Caps Lock is not forwarded as a modifier bit
+        // A Shift change is still a plain modifier change, not Caps Lock.
+        guard case .flagsChanged = keyEvent(.flagsChanged, 0x38, flags: .maskShift).kind else { preconditionFailure() }
+
+        let log = ReportLog(), clock = ManualClock()
+        let router = DirectInputKeyboardRouter(send: log.hid.sendKeyboard, schedule: clock.schedule, now: { clock.now })
+        router.handle(on)
+        precondition(log.keyboard == [KeyboardReport(keys: [.capsLock])])
+        precondition(log.keyboard[0].data == Data([0, 0, 0x39, 0, 0, 0, 0, 0]))
+        precondition(router.isCapsLockHeld && clock.delays == [DirectInputKeyboardRouter.capsLockHoldNanoseconds])
+        clock.fire()
+        precondition(log.keyboard == [KeyboardReport(keys: [.capsLock]), .zero] && !router.isCapsLockHeld)
+
+        // Duplicate delivery / release echo with the same lock state inside the window is ignored.
+        clock.advance(milliseconds: 100)
+        router.handle(on)
+        precondition(log.keyboard.count == 2 && !clock.hasPending)
+        // Next physical press toggles the Mac lock state: accepted even when quick.
+        clock.advance(milliseconds: 50)
+        router.handle(off)
+        precondition(log.keyboard.count == 3 && log.keyboard[2].keys == [.capsLock])
+        clock.fire()
+        precondition(log.keyboard.count == 4 && log.keyboard[3] == .zero)
+        // If macOS does not toggle its lock state (input-source switching), a later press still counts.
+        clock.advance(milliseconds: 300)
+        router.handle(off)
+        precondition(log.keyboard.count == 5 && log.keyboard[4].keys == [.capsLock])
+        clock.fire()
+
+        // Caps Lock while typing keeps the other keys and modifiers in the same report.
+        clock.advance(milliseconds: 300)
+        router.handle(keyEvent(.keyDown, 0x00, flags: .maskShift))
+        router.handle(keyEvent(.flagsChanged, 0x39, flags: [.maskAlphaShift, .maskShift]))
+        precondition(log.keyboard.last == KeyboardReport(modifiers: .leftShift, keys: [.capsLock, .a]))
+        clock.fire()
+        precondition(log.keyboard.last == KeyboardReport(modifiers: .leftShift, keys: [.a]))
+        router.handle(keyEvent(.keyUp, 0x00, flags: []))
+
+        // Stopping during the tap cancels the pending release and leaves nothing pressed.
+        clock.advance(milliseconds: 300)
+        router.handle(off)
+        precondition(router.isCapsLockHeld && clock.hasPending)
+        let cancelsBefore = clock.cancels
+        router.reset()
+        precondition(clock.cancels == cancelsBefore + 1 && !clock.hasPending)
+        precondition(log.keyboard.last == .zero && !router.isCapsLockHeld)
+        let sent = log.keyboard.count
+        clock.fire()
+        precondition(log.keyboard.count == sent)
+        // A fresh session does not inherit the previous duplicate window.
+        router.handle(off)
+        precondition(log.keyboard.last?.keys == [.capsLock])
+        router.reset()
+
+        // Every press report is followed by exactly one release report (no stuck 0x39).
+        let presses = log.keyboard.filter { $0.keys.contains(.capsLock) }.count
+        let releases = zip(log.keyboard, log.keyboard.dropFirst()).filter { $0.keys.contains(.capsLock) && !$1.keys.contains(.capsLock) }.count
+        precondition(presses == releases && !log.keyboard.last!.keys.contains(.capsLock))
+
+        var filter = DirectInputCapsLockFilter()
+        precondition(filter.accept(isOn: true, at: 0))
+        precondition(!filter.accept(isOn: true, at: DirectInputCapsLockFilter.duplicateWindowNanoseconds - 1))
+        precondition(filter.accept(isOn: false, at: 1))
+        precondition(filter.accept(isOn: false, at: 1 + DirectInputCapsLockFilter.duplicateWindowNanoseconds))
+        precondition(log.mouse.isEmpty)
+        print("PASS: Caps Lock flagsChanged -> HID 0x39 press/release, duplicate filter, typing combo, cancel on stop")
+    }
+
+    /// UC-004: a failed start never takes the Mac keyboard and leaves the host neutral.
+    @MainActor
+    static func testCaptureStartFailure() {
+        let log = ReportLog()
+        let controller = DirectInputController()
+        var released = 0
+        controller.start(sendKeyboard: log.hid.sendKeyboard, onRelease: { released += 1 })
+        precondition(!controller.isCapturing && controller.needsAccessibility && released == 1)
+        precondition(log.keyboard == [.zero] && log.mouse.isEmpty)
+        controller.start(log.hid)
+        precondition(!controller.isCapturing && log.mouse.isEmpty)
+        controller.stop()
+        controller.stop() // idempotent
+        precondition(!controller.isCapturing)
+        print("PASS: capture start failure keeps Mac keyboard local, sends neutral report, idempotent stop")
+    }
+
+    static func keyEvent(_ type: CGEventType, _ keyCode: UInt16, flags: CGEventFlags) -> DirectInputEvent {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: type != .keyUp)!
+        event.flags = flags
+        return DirectInputEvent(type: type, event: event)!
     }
 }
