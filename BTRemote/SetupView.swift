@@ -37,7 +37,6 @@ struct SetupView: View {
                     .formStyle(.grouped)
                     .navigationTitle(L10n.App.title)
             }
-            .onDisappear { directInput.stop() }
             .onChange(of: hid.isActive) { isActive in
                 if !isActive { directInput.stop() }
             }

@@ -43,15 +43,17 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
             }
-            Section(header: Text(L10n.Settings.trackpad)) {
-                sensitivityRow(L10n.Settings.trackingSpeed, value: $touchpadSensitivity, range: AppSettings.pointerSensitivityRange)
-                sensitivityRow(L10n.Settings.scrollSpeed, value: $scrollSensitivity, range: AppSettings.scrollSensitivityRange)
-                NavigationLink {
-                    TrackpadGestureSettingsView()
-                } label: {
-                    Label(L10n.Gesture.sectionTitle, systemImage: "hand.draw")
+            #if os(iOS)
+                Section(header: Text(L10n.Settings.trackpad)) {
+                    sensitivityRow(L10n.Settings.trackingSpeed, value: $touchpadSensitivity, range: AppSettings.pointerSensitivityRange)
+                    sensitivityRow(L10n.Settings.scrollSpeed, value: $scrollSensitivity, range: AppSettings.scrollSensitivityRange)
+                    NavigationLink {
+                        TrackpadGestureSettingsView()
+                    } label: {
+                        Label(L10n.Gesture.sectionTitle, systemImage: "hand.draw")
+                    }
                 }
-            }
+            #endif
             #if os(iOS)
                 Section(header: Text(L10n.Settings.connection), footer: Text(L10n.Settings.autoAdvertiseHint)) {
                     Toggle(L10n.Settings.autoAdvertise, isOn: $autoAdvertise)

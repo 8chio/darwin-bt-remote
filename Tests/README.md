@@ -1,6 +1,8 @@
 # Direct Input shortcut verification
 
-Based on local `main` at `1725708`. Caps Lock changes are intentionally absent.
+Shortcut implementation provenance: local `main` at `1725708`.
+Current keyboard-only work starts at `feature/direct-input-toggle`,
+`dc717cfb1182deeecda5bcaf3659275ee5b224ee`, and adds Caps Lock HID support.
 
 Reference: LiLeoH/darwin-bt-remote at `fcb684f519867b9e4c2814ad7905dead5b840b17`:
 [manager](https://github.com/LiLeoH/darwin-bt-remote/blob/fcb684f519867b9e4c2814ad7905dead5b840b17/BTRemote/DirectInputShortcutManager.swift),
@@ -25,14 +27,14 @@ suppression, starting chord filtering, no-shortcut UI start, settings round trip
 registration/system conflict rejection with rollback, recorder pause/resume,
 failed start, current connection state after reconnect, settings reset, and app
 termination notification cleanup. The original letter, Ctrl+Space, emergency
-release, mouse move/click/scroll event decoders are also exercised.
+release decoders are exercised; mouse move/click/scroll must now be rejected.
 
 Optional `.build/direct-input-shortcut-tests --carbon-smoke` briefly registers
 Command+Shift+F19, verifies duplicate registration rejection and cleanup, and
 reports SKIP if registration is unavailable. It does not synthesize keystrokes.
 
-These tests do not verify physical hotkey delivery, the event tap, actual cursor
-restoration, persistence through a real app relaunch, BLE delivery, or iPhone behavior.
+These tests do not verify physical hotkey delivery, the event tap, physical local pointer
+behavior, persistence through a real app relaunch, BLE delivery, or iPhone behavior.
 
 ## MacBook + iPhone
 
@@ -40,9 +42,9 @@ restoration, persistence through a real app relaunch, BLE delivery, or iPhone be
    Bluetooth and Accessibility settings; handle any permission prompt yourself.
 2. Connect using Bluetooth LE. Confirm iPhone hardware keyboard recognition.
 3. With no toggle shortcut set, start Direct Input from Setup. Test English and
-   Korean typing, repeated Ctrl+Space switching, mouse move, left/right click,
-   and scroll. Release with Control+Option and verify normal Mac input/cursor.
-4. In Settings > Direct Input Shortcut, record a free shortcut such as
+   Korean typing, Caps Lock and Ctrl+Space switching. Mouse movement, clicks,
+   drag, scroll and gestures must stay on Mac. Release with Control+Option.
+4. In Settings > Remote Keyboard Shortcut, record a free shortcut such as
    Command+Shift+D. Ensure Command+Space and Control+Space are rejected without
    replacing the current binding. A Carbon-registered conflicting app shortcut
    should also produce an error and preserve the previous binding.
@@ -52,7 +54,7 @@ restoration, persistence through a real app relaunch, BLE delivery, or iPhone be
 6. Repeat with another Mac app focused. Test holding the shortcut key: one
    physical press should toggle once. Test both left and right modifiers.
 7. Repeat a full start/stop cycle 20 times. Check that the Mac cursor and keyboard
-   return each time, and that ordinary input/Ctrl+Space still work between cycles.
+   remain usable locally after release, and that ordinary input/Ctrl+Space work.
 8. Disconnect while capturing: capture should stop. Reconnect and repeat the
    shortcut. Confirm it uses the current connection, not a stale HID backend.
 9. Quit/relaunch and verify the saved binding, recording cancellation via Escape,
@@ -65,3 +67,20 @@ restoration, persistence through a real app relaunch, BLE delivery, or iPhone be
 Record pass/fail separately for each physical scenario. Automated PASS is not an
 iPhone test result. Global shortcuts implemented by other apps using independent
 key event taps may not reserve a Carbon hotkey and cannot all be detected in advance.
+
+## Keyboard-only implementation (experiment/codex)
+
+Run `bash Tests/run-direct-input-shortcut-tests.sh` and
+`python3 Tests/verify-keyboard-only-ui.py` from the repository root.
+The Swift harness now checks keyboard-only event masks/decoding, Caps Lock
+`0x39` press/release and duplicate suppression, held-key/modifier reports,
+permission-failure cleanup, backend reset selection, disconnect/reconnect,
+20 toggle cycles, shutdown, and BLE keyboard FIFO backpressure/overflow behavior.
+The Python check verifies macOS-only UI/source boundaries and saved trackpad-page
+migration; it does not render the interface or test actual pointing devices.
+
+These tests neither install a live event tap nor inject OS input. Manager tests
+use fake capture/monitor objects; permission failure tests use the real controller
+with an untrusted permission stub. They cannot establish that an iPhone received
+reports or switched languages. See `IMPLEMENTATION_REPORT.md` for build results,
+environment limitations, and the required Mac+iPhone manual checklist.

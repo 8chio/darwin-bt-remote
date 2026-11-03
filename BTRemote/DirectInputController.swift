@@ -14,65 +14,51 @@
         private var eventTap: CFMachPort?
         private var runLoopSource: CFRunLoopSource?
         private var statusItem: NSStatusItem?
-        private var pressedKeys: Set<Keycode> = []
-        private var pressedMouseButtons: MouseButtons = []
-        private var modifiers: KeyboardModifiers = []
-        private var cursorHidden = false
+        private var keyboardState = DirectInputKeyboardState()
         private var shortcutSuppression = DirectInputShortcutSuppression()
         var toggleHotkey: DirectInputHotkey?
         var onToggleShortcut: (() -> Void)?
         var onShortcutKeyUp: ((UInt16) -> Void)?
 
         private var sendKeyboard: ((KeyboardReport) -> Void)?
-        private var sendMouse: ((MouseReport) -> Void)?
+        private var releaseKeyboard: (() -> Void)?
         private var onRelease: (() -> Void)?
 
         /// capture input and route it to HID backend
         func start(_ hid: HIDInput, suppressing hotkey: DirectInputHotkey? = nil) {
-            start(sendKeyboard: hid.sendKeyboard, sendMouse: hid.sendMouse, onRelease: {})
+            guard hid.isConnected else {
+                stop()
+                lastError = String(localized: "shortcut.no_host")
+                return
+            }
+            start(sendKeyboard: hid.sendKeyboard, releaseKeyboard: hid.releaseKeyboard, onRelease: {})
             if isCapturing { shortcutSuppression = DirectInputShortcutSuppression(hotkey) }
         }
 
         func start(
             sendKeyboard: @escaping (KeyboardReport) -> Void,
-            sendMouse: @escaping (MouseReport) -> Void,
+            releaseKeyboard: (() -> Void)? = nil,
             onRelease: @escaping () -> Void
         ) {
             stop()
 
             self.sendKeyboard = sendKeyboard
-            self.sendMouse = sendMouse
+            self.releaseKeyboard = releaseKeyboard ?? { sendKeyboard(.zero) }
             self.onRelease = onRelease
-            pressedKeys.removeAll()
-            pressedMouseButtons = []
-            modifiers = []
+            keyboardState = DirectInputKeyboardState(capsLockOn: CGEventSource.flagsState(.combinedSessionState).contains(.maskAlphaShift))
             lastError = nil
+            needsAccessibility = false
 
             guard AccessibilityPermission.isTrusted else {
                 needsAccessibility = true
+                lastError = L10n.DirectInput.captureFailedString
+                self.releaseKeyboard?()
                 clearHandlers()
                 onRelease()
                 return
             }
 
-            let mask = [
-                CGEventType.keyDown,
-                .keyUp,
-                .flagsChanged,
-                .mouseMoved,
-                .leftMouseDown,
-                .leftMouseUp,
-                .leftMouseDragged,
-                .rightMouseDown,
-                .rightMouseUp,
-                .rightMouseDragged,
-                .otherMouseDown,
-                .otherMouseUp,
-                .otherMouseDragged,
-                .scrollWheel
-            ].reduce(CGEventMask(0)) { result, type in
-                result | (CGEventMask(1) << CGEventMask(type.rawValue))
-            }
+            let mask = DirectInputEvent.captureMask
 
             let refcon = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
             guard let tap = CGEvent.tapCreate(
@@ -84,6 +70,7 @@
                 userInfo: refcon
             ) else {
                 lastError = L10n.DirectInput.captureFailedString
+                self.releaseKeyboard?()
                 clearHandlers()
                 onRelease()
                 return
@@ -95,6 +82,7 @@
                 CFMachPortInvalidate(tap)
                 eventTap = nil
                 lastError = L10n.DirectInput.captureFailedString
+                self.releaseKeyboard?()
                 clearHandlers()
                 onRelease()
                 return
@@ -107,21 +95,14 @@
                 onRelease()
                 return
             }
-            guard CGAssociateMouseAndMouseCursorPosition(boolean_t(0)) == .success else {
-                stop()
-                lastError = L10n.DirectInput.captureFailedString
-                onRelease()
-                return
-            }
-            NSCursor.hide()
-            cursorHidden = true
+            releaseKeyboard?()
             isCapturing = true
             log.info("capture started")
             showStatusItem()
         }
 
         func stop() {
-            if isCapturing { log.info("capture stopped; releasing keyboard, mouse and cursor") }
+            if isCapturing { log.info("capture stopped; releasing keyboard") }
             isCapturing = false
             shortcutSuppression = DirectInputShortcutSuppression()
             if let eventTap {
@@ -134,17 +115,8 @@
             eventTap = nil
             runLoopSource = nil
 
-            if cursorHidden {
-                NSCursor.unhide()
-                cursorHidden = false
-            }
-            CGAssociateMouseAndMouseCursorPosition(boolean_t(1))
-
-            pressedKeys.removeAll()
-            pressedMouseButtons = []
-            modifiers = []
-            sendKeyboard?(.zero)
-            sendMouse?(.zero)
+            keyboardState = DirectInputKeyboardState()
+            releaseKeyboard?()
             clearHandlers()
             hideStatusItem()
         }
@@ -155,17 +127,20 @@
 
         private func clearHandlers() {
             sendKeyboard = nil
-            sendMouse = nil
+            releaseKeyboard = nil
             onRelease = nil
         }
 
-        /// menu bar warning shown while capturing, since the cursor is hidden and the window is unreachable
+        /// Always available mouse-click escape while keyboard capture is active.
         private func showStatusItem() {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             if let button = item.button {
                 let icon = NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil)?
                     .withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [.systemRed]))
                 icon?.isTemplate = false
+                button.toolTip = String(localized: "keyboard_only.stop")
+                button.target = self
+                button.action = #selector(releaseFromStatusItem)
                 button.image = icon
                 button.imagePosition = .imageLeading
                 button.attributedTitle = NSAttributedString(
@@ -175,6 +150,8 @@
             }
             statusItem = item
         }
+
+        @objc private func releaseFromStatusItem() { stop() }
 
         private func hideStatusItem() {
             if let statusItem {
@@ -191,38 +168,18 @@
                 return
             }
 
-            modifiers = event.modifiers
-
-            switch event.kind {
-            case let .keyDown(key):
-                pressedKeys.insert(key)
-                sendKeyboardReport()
-            case let .keyUp(key):
-                pressedKeys.remove(key)
-                sendKeyboardReport()
-            case .flagsChanged:
-                sendKeyboardReport()
-            case let .mouseMove(dx, dy):
-                sendMouse?(MouseReport(buttons: pressedMouseButtons, dX: dx, dY: dy))
-            case let .mouseButton(button, isDown):
-                if isDown {
-                    pressedMouseButtons.insert(button)
-                } else {
-                    pressedMouseButtons.remove(button)
-                }
-                sendMouse?(MouseReport(buttons: pressedMouseButtons))
-            case let .scroll(wheel):
-                sendMouse?(MouseReport(buttons: pressedMouseButtons, wheel: wheel))
-                sendMouse?(MouseReport(buttons: pressedMouseButtons))
-            }
-        }
-
-        private func sendKeyboardReport() {
-            sendKeyboard?(KeyboardReport(modifiers: modifiers, keys: Array(pressedKeys).prefix(6).map(\.self)))
+            for report in keyboardState.handle(event) { sendKeyboard?(report) }
         }
 
         private func intercept(_ input: DirectInputShortcutEvent) {
             guard isCapturing else { return }
+            // Emergency release uses raw flags, even while the activation chord
+            // is suppressed or an unmapped key is pressed.
+            if input.isEmergencyRelease {
+                onRelease?()
+                stop()
+                return
+            }
             if input.type == .keyUp { onShortcutKeyUp?(input.keyCode) }
             if input.isToggle(hotkey: toggleHotkey) {
                 if let onToggleShortcut { onToggleShortcut() } else { stop() }
@@ -234,10 +191,10 @@
         }
 
         private nonisolated static let eventTapCallback: CGEventTapCallBack = { _, type, cgEvent, userInfo in
-            guard let userInfo else { return nil }
+            guard let userInfo else { return Unmanaged.passUnretained(cgEvent) }
             let controller = Unmanaged<DirectInputController>.fromOpaque(userInfo).takeUnretainedValue()
             if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                // Release immediately rather than retaining keys/cursor after capture fails.
+                // Release immediately rather than retaining keys after capture fails.
                 MainActor.assumeIsolated {
                     guard controller.isCapturing else { return }
                     controller.log.error("capture tap disabled; releasing input")
@@ -249,8 +206,12 @@
             // The tap is installed on the main run loop. Process synchronously so
             // queued events cannot cross a stop/start boundary or race a Carbon toggle.
             let input = DirectInputShortcutEvent(type: type, event: cgEvent)
-            MainActor.assumeIsolated { controller.intercept(input) }
-            return nil
+            let consumed = MainActor.assumeIsolated {
+                guard controller.isCapturing, DirectInputEvent.captures(type) else { return false }
+                controller.intercept(input)
+                return true
+            }
+            return consumed ? nil : Unmanaged.passUnretained(cgEvent)
         }
 
     }
@@ -270,6 +231,10 @@
             decoded = DirectInputEvent(type: type, event: event)
         }
 
+        var isEmergencyRelease: Bool {
+            flags.contains(.maskControl) && flags.contains(.maskAlternate)
+        }
+
         func isToggle(hotkey: DirectInputHotkey?) -> Bool {
             type == .keyDown && !isRepeat && hotkey?.matches(keyCode: keyCode, flags: flags) == true
         }
@@ -287,10 +252,12 @@
             case keyDown(Keycode)
             case keyUp(Keycode)
             case flagsChanged
-            case mouseMove(Int8, Int8)
-            case mouseButton(MouseButtons, Bool)
-            case scroll(Int8)
+            case capsLock(Bool)
         }
+
+        static let capturedTypes: [CGEventType] = [.keyDown, .keyUp, .flagsChanged]
+        static let captureMask = capturedTypes.reduce(CGEventMask(0)) { $0 | (CGEventMask(1) << $1.rawValue) }
+        static func captures(_ type: CGEventType) -> Bool { capturedTypes.contains(type) }
 
         let kind: Kind
         var modifiers: KeyboardModifiers
@@ -301,6 +268,14 @@
             modifiers = KeyboardModifiers(eventFlags: flags)
             releaseShortcutPressed = flags.contains(.maskControl) && flags.contains(.maskAlternate)
 
+            // Caps Lock is a latch transition, not an ordinary keyDown/keyUp pair.
+            let keyCode = UInt16(truncatingIfNeeded: event.getIntegerValueField(.keyboardEventKeycode))
+            if keyCode == 0x39 {
+                guard type == .flagsChanged,
+                      event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return nil }
+                kind = .capsLock(flags.contains(.maskAlphaShift))
+                return
+            }
             switch type {
             case .keyDown:
                 if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
@@ -311,37 +286,41 @@
                 kind = .keyUp(key)
             case .flagsChanged:
                 kind = .flagsChanged
-            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-                let dx = Self.clampInt8(event.getIntegerValueField(.mouseEventDeltaX))
-                let dy = Self.clampInt8(event.getIntegerValueField(.mouseEventDeltaY))
-                guard dx != 0 || dy != 0 else { return nil }
-                kind = .mouseMove(dx, dy)
-            case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
-                guard let button = Self.mouseButton(for: type) else { return nil }
-                kind = .mouseButton(button.0, button.1)
-            case .scrollWheel:
-                let wheel = Self.clampInt8(event.getIntegerValueField(.scrollWheelEventDeltaAxis1))
-                guard wheel != 0 else { return nil }
-                kind = .scroll(wheel)
             default:
                 return nil
             }
         }
 
-        private static func clampInt8(_ value: Int64) -> Int8 {
-            Int8(max(-127, min(127, Int(value))))
+    }
+
+    /// Report state shared by the live capture path and the deterministic test harness.
+    struct DirectInputKeyboardState {
+        private var pressedKeys: Set<Keycode> = []
+        private var capsLockOn: Bool
+
+        init(capsLockOn: Bool = false) { self.capsLockOn = capsLockOn }
+
+        mutating func handle(_ event: DirectInputEvent) -> [KeyboardReport] {
+            switch event.kind {
+            case let .keyDown(key):
+                guard pressedKeys.insert(key).inserted else { return [] }
+            case let .keyUp(key):
+                pressedKeys.remove(key)
+            case .flagsChanged:
+                break
+            case let .capsLock(on):
+                guard on != capsLockOn else { return [] }
+                capsLockOn = on
+                // Reserve one of the six boot-keyboard slots for Caps Lock, then
+                // restore held keys immediately. No delayed release can cross sessions.
+                return [KeyboardReport(modifiers: event.modifiers, keys: Array(keys.prefix(5)) + [.capsLock]),
+                        KeyboardReport(modifiers: event.modifiers, keys: keys)]
+            }
+            return [KeyboardReport(modifiers: event.modifiers, keys: keys)]
         }
 
-        private static func mouseButton(for type: CGEventType) -> (MouseButtons, Bool)? {
-            switch type {
-            case .leftMouseDown: (.left, true)
-            case .leftMouseUp: (.left, false)
-            case .rightMouseDown: (.right, true)
-            case .rightMouseUp: (.right, false)
-            case .otherMouseDown: (.middle, true)
-            case .otherMouseUp: (.middle, false)
-            default: nil
-            }
+        private var keys: [Keycode] {
+            Array(pressedKeys.sorted { $0.rawValue < $1.rawValue }.prefix(6))
         }
     }
 

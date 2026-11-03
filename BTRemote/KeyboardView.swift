@@ -35,6 +35,9 @@ struct KeyboardView: View {
         if hid.isActive || developerMode {
             VStack(spacing: 6) {
                 pageSwitcher
+                #if os(macOS)
+                    EmptyView().onAppear { if selectedPage == 1 { selectedPage = 0 } }
+                #endif
                 contentView
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -43,9 +46,17 @@ struct KeyboardView: View {
         }
     }
 
+    private var availablePages: [KeyboardPage] {
+        #if os(macOS)
+            [.fullKeyboard, .classic]
+        #else
+            KeyboardPage.allCases
+        #endif
+    }
+
     private var pageSwitcher: some View {
         HStack(spacing: 6) {
-            ForEach(KeyboardPage.allCases) { page in
+            ForEach(availablePages) { page in
                 Button {
                     Haptics.tap()
                     withAnimation(.easeInOut(duration: 0.18)) {
@@ -98,7 +109,11 @@ struct KeyboardView: View {
         case 0:
             FullKeyboardView()
         case 1:
-            StandaloneTrackpadView(hid: hid)
+            #if os(iOS)
+                StandaloneTrackpadView(hid: hid)
+            #else
+                FullKeyboardView()
+            #endif
         case 2:
             ClassicKeyboardView()
         default:

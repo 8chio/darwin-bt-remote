@@ -4104,13 +4104,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Direct Input Shortcut"
+            "value": "Remote Keyboard Shortcut"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Direct Input 단축키"
+            "value": "Remote Keyboard 단축키"
           }
         }
       }
@@ -4121,13 +4121,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Record a shortcut with Control, Option, or Command and a key. The same shortcut starts and stops Direct Input. Control + Option always releases capture. You can also start from Setup without a shortcut."
+            "value": "Record a shortcut with Control, Option, or Command and a key. The same shortcut starts and stops Remote Keyboard. Control + Option always releases capture. You can also start from Setup without a shortcut."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Control, Option 또는 Command와 키를 조합하세요. 같은 단축키로 Direct Input을 시작·종료합니다. Control + Option은 항상 비상 종료합니다. 단축키 없이도 설정 화면에서 시작할 수 있습니다."
+            "value": "Control, Option 또는 Command와 키를 조합하세요. 같은 단축키로 Remote Keyboard을 시작·종료합니다. Control + Option은 항상 비상 종료합니다. 단축키 없이도 설정 화면에서 시작할 수 있습니다."
           }
         }
       }
@@ -4325,13 +4325,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connect a Bluetooth HID host before starting Direct Input."
+            "value": "Connect a Bluetooth HID host before starting Remote Keyboard."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Direct Input을 시작하기 전에 Bluetooth HID 기기를 연결하세요."
+            "value": "Remote Keyboard을 시작하기 전에 Bluetooth HID 기기를 연결하세요."
           }
         }
       }
@@ -4349,6 +4349,198 @@
           "stringUnit": {
             "state": "translated",
             "value": "저장된 단축키를 읽지 못했습니다. 새 단축키를 지정하세요."
+          }
+        }
+      }
+    },
+    "keyboard_only.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote Keyboard"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "원격 키보드"
+          }
+        }
+      }
+    },
+    "keyboard_only.start": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send keyboard to iPhone"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키보드를 iPhone으로 전환"
+          }
+        }
+      }
+    },
+    "keyboard_only.stop": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Return keyboard to Mac"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키보드를 Mac으로 복귀"
+          }
+        }
+      }
+    },
+    "keyboard_only.connected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth connected"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth 연결됨"
+          }
+        }
+      }
+    },
+    "keyboard_only.disconnected": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth disconnected"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth 연결 안 됨"
+          }
+        }
+      }
+    },
+    "keyboard_only.target_remote": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard: iPhone / connected host"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키보드: iPhone / 연결된 기기"
+          }
+        }
+      }
+    },
+    "keyboard_only.target_mac": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyboard: Mac"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키보드: Mac"
+          }
+        }
+      }
+    },
+    "keyboard_only.pointer_hint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mouse and trackpad stay on Mac. Release: Control + Option, the toggle shortcut, or this button."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "마우스와 트랙패드는 Mac에서 동작합니다. 해제: Control + Option, 전환 단축키 또는 이 버튼."
+          }
+        }
+      }
+    },
+    "keyboard_only.caps_title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caps Lock language switching on iPhone"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone Caps Lock 한/영 전환 안내"
+          }
+        }
+      }
+    },
+    "keyboard_only.caps_help": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On iPhone, add Korean and English keyboards. After connecting, check Settings → General → Keyboard → Hardware Keyboard → Switch Languages using Caps Lock (availability/name varies by iOS). Actual switching needs device verification. If unavailable, try Control + Space. Mac input-source remapping or Caps Lock state may affect capture."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iPhone에 한국어·영어 키보드를 추가하세요. 연결 후 설정 → 일반 → 키보드 → 하드웨어 키보드에서 Caps Lock 언어 전환을 확인하세요(이름·지원 여부는 iOS에 따라 다름). 실제 전환은 기기 검증이 필요합니다. 미지원 시 Control + Space를 시도하세요. Mac 입력 소스 키 매핑과 Caps Lock 상태가 캡처에 영향을 줄 수 있습니다."
+          }
+        }
+      }
+    },
+    "keyboard_only.prompt": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send only keyboard input to the connected host? Mouse and trackpad continue controlling Mac."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "연결된 기기로 키보드 입력만 전송할까요? 마우스와 트랙패드는 계속 Mac을 제어합니다."
+          }
+        }
+      }
+    },
+    "keyboard_only.permission": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remote Keyboard needs Accessibility access to capture keyboard input. Allow this app in System Settings. Mouse and trackpad remain on Mac."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "키보드 입력을 전송하려면 손쉬운 사용 권한이 필요합니다. 시스템 설정에서 이 앱을 허용하세요. 마우스와 트랙패드는 Mac에서 동작합니다."
           }
         }
       }

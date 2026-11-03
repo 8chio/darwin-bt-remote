@@ -170,6 +170,10 @@
             log.info("toggle shortcut=\(fromShortcut) before=\(wasCapturing) after=\(capturing)")
         }
 
+        func connectionChanged(_ connected: Bool) {
+            if !connected { directInput?.stop() }
+        }
+
         func shutdown() {
             log.info("app shutdown: release capture and unregister shortcut")
             directInput?.stop()

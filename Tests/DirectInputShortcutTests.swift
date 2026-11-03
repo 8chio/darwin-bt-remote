@@ -14,6 +14,7 @@ struct HIDInput {
     var sendKeyboard: (KeyboardReport) -> Void = { _ in }
     var sendMouse: (MouseReport) -> Void = { _ in }
     var isConnected = true
+    var releaseKeyboard: (() -> Void)? = nil
 }
 
 @MainActor
@@ -80,6 +81,8 @@ struct DirectInputShortcutTests {
         precondition(roundTrip == binding)
         testSuppression(binding)
         testEventPaths(binding)
+        testCaptureFailure()
+        testKeyboardBuffer()
 
         let defaults = MemoryPreferences()
         let monitor = TestMonitor(), capture = TestCapture()
@@ -137,6 +140,11 @@ struct DirectInputShortcutTests {
         let conflicted = DirectInputShortcutManager(defaults: defaults, monitor: TestMonitor(), systemConflict: { _ in true })
         precondition(!conflicted.setHotkey(replacement) && conflicted.hotkey == binding)
         manager.toggle()
+        manager.connectionChanged(false)
+        precondition(!capture.isCapturing)
+        manager.connectionChanged(true)
+        precondition(!capture.isCapturing) // Reconnection never recaptures automatically.
+        manager.toggle()
         NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil)
         precondition(!capture.isCapturing && !manager.isMonitoring && capture.onToggleShortcut == nil)
         precondition(manager.setHotkey(nil))
@@ -149,6 +157,29 @@ struct DirectInputShortcutTests {
         precondition(reloaded.hotkey == nil && !reloaded.isMonitoring)
         if CommandLine.arguments.contains("--carbon-smoke") { carbonSmoke() }
         print("PASS: matching/validation, 20 toggle cycles, repeats, UI without shortcut, persistence, conflicts/rollback, recorder pause/resume, failed start, reconnect, shutdown/reset")
+    }
+
+    static func testKeyboardBuffer() {
+        var buffer = KeyboardReportBuffer()
+        let caps = KeyboardReport(keys: [.capsLock])
+        precondition(buffer.append(caps) && buffer.append(.zero))
+        precondition(buffer.count == 4)
+        // A failed transport write leaves first untouched; retry does not lose the edge.
+        precondition(buffer.first?.report == caps && buffer.first?.boot == false)
+        precondition(buffer.first?.report == caps)
+        buffer.removeFirst()
+        precondition(buffer.first?.report == caps && buffer.first?.boot == true)
+        buffer.removeFirst()
+        precondition(buffer.first?.report == .zero && buffer.first?.boot == false)
+        buffer.removeFirst()
+        precondition(buffer.first?.report == .zero && buffer.first?.boot == true)
+        buffer.removeFirst()
+        precondition(buffer.first == nil)
+        for _ in 0 ..< 128 { precondition(buffer.append(caps)) }
+        precondition(!buffer.append(caps) && buffer.count == 2 && buffer.first?.report == .zero)
+        buffer.clear()
+        precondition(buffer.count == 0 && buffer.first == nil)
+        print("PASS: BLE keyboard FIFO press/release, boot/report ordering, retry retention, overflow neutralization/reset")
     }
 
     @MainActor
@@ -206,14 +237,84 @@ struct DirectInputShortcutTests {
         guard let letter = DirectInputEvent(type: .keyDown, event: event), case .keyDown(.a) = letter.kind else { preconditionFailure() }
         event.flags = [.maskControl, .maskAlternate]
         precondition(DirectInputEvent(type: .flagsChanged, event: event)?.releaseShortcutPressed == true)
+        precondition(DirectInputShortcutEvent(type: .flagsChanged, event: event).isEmergencyRelease)
+        event.setIntegerValueField(.keyboardEventKeycode, value: 127)
+        precondition(DirectInputShortcutEvent(type: .keyDown, event: event).isEmergencyRelease)
         let mouse = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: .zero, mouseButton: .left)!
         mouse.setIntegerValueField(.mouseEventDeltaX, value: 8)
         mouse.setIntegerValueField(.mouseEventDeltaY, value: -5)
-        guard let move = DirectInputEvent(type: .mouseMoved, event: mouse), case .mouseMove(8, -5) = move.kind else { preconditionFailure() }
-        guard let click = DirectInputEvent(type: .leftMouseDown, event: mouse), case .mouseButton(.left, true) = click.kind else { preconditionFailure() }
-        guard let release = DirectInputEvent(type: .leftMouseUp, event: mouse), case .mouseButton(.left, false) = release.kind else { preconditionFailure() }
-        let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 2, wheel2: 0, wheel3: 0)!
-        guard let scroll = DirectInputEvent(type: .scrollWheel, event: wheel), case .scroll(2) = scroll.kind else { preconditionFailure() }
-        print("PASS: captured shortcut filtering, starting chord suppression, existing A/Ctrl+Space/emergency/mouse/click/scroll decoders")
+        for type: CGEventType in [.mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+                                  .rightMouseDown, .rightMouseUp, .rightMouseDragged,
+                                  .otherMouseDown, .otherMouseUp, .otherMouseDragged, .scrollWheel] {
+            precondition(!DirectInputEvent.captures(type))
+            precondition(DirectInputEvent.captureMask & (CGEventMask(1) << type.rawValue) == 0)
+            precondition(DirectInputEvent(type: type, event: mouse) == nil)
+        }
+        for type: CGEventType in [.keyDown, .keyUp, .flagsChanged] {
+            precondition(DirectInputEvent.captures(type))
+            precondition(DirectInputEvent.captureMask & (CGEventMask(1) << type.rawValue) != 0)
+        }
+        testKeyboardReports()
+        print("PASS: keyboard-only mask/decoder, shortcut suppression, A/Ctrl+Space/emergency decoding")
+    }
+
+    static func testKeyboardReports() {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)!
+        var state = DirectInputKeyboardState()
+        func decode(_ type: CGEventType, _ code: Int64, _ flags: CGEventFlags = []) -> DirectInputEvent {
+            event.setIntegerValueField(.keyboardEventKeycode, value: code)
+            event.flags = flags
+            return DirectInputEvent(type: type, event: event)!
+        }
+        precondition(state.handle(decode(.keyDown, 0, .maskShift)) == [KeyboardReport(modifiers: .leftShift, keys: [.a])])
+        precondition(state.handle(decode(.keyDown, 0, .maskShift)).isEmpty)
+        let caps = decode(.flagsChanged, 57, [.maskAlphaShift, .maskShift])
+        let reports = state.handle(caps)
+        precondition(reports == [KeyboardReport(modifiers: .leftShift, keys: [.a, .capsLock]),
+                                 KeyboardReport(modifiers: .leftShift, keys: [.a])])
+        precondition(reports[0].data.contains(0x39) && !reports[1].data.contains(0x39))
+        precondition(state.handle(caps).isEmpty)
+        precondition(state.handle(decode(.flagsChanged, 57)).count == 2)
+        precondition(state.handle(decode(.flagsChanged, 57)).isEmpty)
+        precondition(state.handle(decode(.keyUp, 0)) == [.zero])
+        for flag: CGEventFlags in [.maskShift, .maskControl, .maskAlternate, .maskCommand] {
+            precondition(state.handle(decode(.flagsChanged, 56, flag))[0].modifiers.rawValue != 0)
+            precondition(state.handle(decode(.flagsChanged, 56)) == [.zero])
+        }
+        state = DirectInputKeyboardState(capsLockOn: true)
+        precondition(state.handle(decode(.flagsChanged, 57, .maskAlphaShift)).isEmpty)
+        precondition(state.handle(decode(.flagsChanged, 57)) == [KeyboardReport(keys: [.capsLock]), .zero])
+        // Six held keys must not crowd Caps Lock out of the boot report.
+        for code: Int64 in [0, 11, 8, 2, 14, 3] { _ = state.handle(decode(.keyDown, code)) }
+        let full = state.handle(decode(.flagsChanged, 57, .maskAlphaShift))
+        precondition(full.count == 2 && full[0].data.contains(0x39) && !full[1].data.contains(0x39))
+        for type: CGEventType in [.keyDown, .keyUp] {
+            event.setIntegerValueField(.keyboardEventKeycode, value: 57)
+            precondition(DirectInputEvent(type: type, event: event) == nil)
+        }
+        event.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        precondition(DirectInputEvent(type: .flagsChanged, event: event) == nil)
+        print("PASS: Caps Lock 0x39 press/release, duplicate latch/repeat rejection, held keys, modifiers, six-key rollover")
+    }
+
+    @MainActor
+    static func testCaptureFailure() {
+        let controller = DirectInputController()
+        var reports: [KeyboardReport] = []
+        var releases = 0
+        for _ in 0 ..< 20 {
+            controller.start(sendKeyboard: { reports.append($0) }, onRelease: { releases += 1 })
+            precondition(!controller.isCapturing && controller.needsAccessibility && controller.lastError != nil)
+            controller.stop()
+        }
+        precondition(releases == 20 && reports == Array(repeating: .zero, count: 20))
+        var resets = 0
+        controller.start(sendKeyboard: { _ in preconditionFailure("Use the backend reset for failure cleanup") },
+                         releaseKeyboard: { resets += 1 }, onRelease: {})
+        controller.stop()
+        precondition(resets == 1)
+        controller.start(HIDInput(isConnected: false))
+        precondition(!controller.isCapturing && controller.lastError != nil)
+        print("PASS: actual controller permission failure/neutral release, idempotent stop, disconnected start refusal (20 cycles)")
     }
 }

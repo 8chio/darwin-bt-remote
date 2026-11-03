@@ -483,11 +483,19 @@ extension L10n {
 
     enum DirectInput {
         static var section: LocalizedStringKey {
-            "section.direct_input"
+            #if os(macOS)
+                "keyboard_only.title"
+            #else
+                "section.direct_input"
+            #endif
         }
 
         static var toggle: LocalizedStringKey {
-            "direct_input.toggle"
+            #if os(macOS)
+                "keyboard_only.start"
+            #else
+                "direct_input.toggle"
+            #endif
         }
 
         static var releaseHint: LocalizedStringKey {
@@ -511,7 +519,11 @@ extension L10n {
         }
 
         static var permissionMessage: LocalizedStringKey {
-            "direct_input.permission_message"
+            #if os(macOS)
+                "keyboard_only.permission"
+            #else
+                "direct_input.permission_message"
+            #endif
         }
 
         static var openSettings: LocalizedStringKey {
@@ -523,11 +535,19 @@ extension L10n {
         }
 
         static var connectedPromptTitle: LocalizedStringKey {
-            "direct_input.connected_prompt_title"
+            #if os(macOS)
+                "keyboard_only.title"
+            #else
+                "direct_input.connected_prompt_title"
+            #endif
         }
 
         static var connectedPromptMessage: LocalizedStringKey {
-            "direct_input.connected_prompt_message"
+            #if os(macOS)
+                "keyboard_only.prompt"
+            #else
+                "direct_input.connected_prompt_message"
+            #endif
         }
     }
 

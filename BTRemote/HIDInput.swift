@@ -16,6 +16,7 @@ struct HIDInput {
     let isConnected: Bool
     let activeError: String?
     let batteryLevel: UInt8
+    var releaseKeyboard: (() -> Void)? = nil
 
     func tap(_ key: Keycode, modifiers: KeyboardModifiers = []) {
         sendKeyboard(KeyboardReport(modifiers: modifiers, keys: [key]))
@@ -126,10 +127,11 @@ extension HIDInput {
             sendConsumer: { lowEnergy.sendConsumer($0) },
             sendDigitizer: { lowEnergy.sendDigitizer($0) },
             updateBattery: { lowEnergy.updateBatteryLevel($0) },
-            isActive: lowEnergy.isHIDServiceAdded,
-            isConnected: lowEnergy.connectedCentrals.contains { !lowEnergy.inactiveCentrals.contains($0) } || !central.connected.isEmpty,
+            isActive: lowEnergy.state == .poweredOn && lowEnergy.isHIDServiceAdded,
+            isConnected: lowEnergy.state == .poweredOn && (lowEnergy.connectedCentrals.contains { !lowEnergy.inactiveCentrals.contains($0) } || !central.connected.isEmpty),
             activeError: lowEnergy.lastError ?? central.lastError,
-            batteryLevel: lowEnergy.batteryLevel
+            batteryLevel: lowEnergy.batteryLevel,
+            releaseKeyboard: { lowEnergy.releaseKeyboard() }
         )
     }
 }

@@ -26,14 +26,18 @@ struct ClassicKeyboardView: View {
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity)
-                    TrackpadPanel(hid: hid).frame(width: geo.size.width * 0.42)
+                    #if os(iOS)
+                        TrackpadPanel(hid: hid).frame(width: geo.size.width * 0.42)
+                    #endif
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 12) {
                     inputField
                     keyPanel
-                    TrackpadPanel(hid: hid).frame(maxHeight: .infinity)
+                    #if os(iOS)
+                        TrackpadPanel(hid: hid).frame(maxHeight: .infinity)
+                    #endif
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }

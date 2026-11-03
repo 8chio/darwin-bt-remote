@@ -48,6 +48,7 @@ final class HIDPeripheral: NSObject, ObservableObject {
         ReportID.digitizer.rawValue: DigitizerReport.zero.data
     ]
 
+    private var keyboardBuffer = KeyboardReportBuffer()
     private var pendingBroadcast: (Data, CBMutableCharacteristic)?
 
     func start() {
@@ -86,6 +87,8 @@ final class HIDPeripheral: NSObject, ObservableObject {
         isHIDServiceAdded = false
         isReadyToSendNotification = true
         pendingBroadcast = nil
+        keyboardBuffer.clear()
+        cachedReports[ReportID.keyboard.rawValue] = KeyboardReport.zero.data
         batteryServiceObj = nil
         deviceInfoServiceObj = nil
         hidServiceObj = nil
@@ -111,9 +114,40 @@ final class HIDPeripheral: NSObject, ObservableObject {
     }
 
     func sendKeyboard(_ report: KeyboardReport) {
-        broadcast(report.data, reportID: .keyboard)
-        // boot mode hosts read this characteristic instead
-        bootKeyboardInputChar.map { _ = updateValue(report.data, for: $0) }
+        cachedReports[ReportID.keyboard.rawValue] = report.data
+        guard !activeRecipients().isEmpty else {
+            keyboardBuffer.clear()
+            cachedReports[ReportID.keyboard.rawValue] = KeyboardReport.zero.data
+            return
+        }
+        if !keyboardBuffer.append(report) {
+            cachedReports[ReportID.keyboard.rawValue] = KeyboardReport.zero.data
+            lastError = "Keyboard notification queue overflow; keyboard released."
+        }
+        drainKeyboardReports()
+    }
+
+    func releaseKeyboard() {
+        // Stop must not replay buffered typing after the keyboard returns to Mac.
+        keyboardBuffer.clear()
+        sendKeyboard(.zero)
+    }
+
+    private func drainKeyboardReports() {
+        guard let pManager else { return }
+        while isReadyToSendNotification, let delivery = keyboardBuffer.first {
+            let characteristic = delivery.boot ? bootKeyboardInputChar : charsByReportID[ReportID.keyboard.rawValue]
+            guard let characteristic else { keyboardBuffer.removeFirst(); continue }
+            let recipients = activeRecipients().filter {
+                subscribedCentrals[$0.identifier]?.contains(characteristic.uuid) == true
+            }
+            guard !recipients.isEmpty else { keyboardBuffer.removeFirst(); continue }
+            guard pManager.updateValue(delivery.report.data, for: characteristic, onSubscribedCentrals: recipients) else {
+                isReadyToSendNotification = false
+                return
+            }
+            keyboardBuffer.removeFirst()
+        }
     }
 
     func sendConsumer(_ report: ConsumerReport) {
@@ -441,6 +475,14 @@ extension HIDPeripheral: @preconcurrency CBPeripheralManagerDelegate {
             installServices()
         }
         if peripheral.state != .poweredOn {
+            isReadyToSendNotification = true
+            pendingBroadcast = nil
+            subscribedCentrals.removeAll()
+            centralObjects.removeAll()
+            connectedCentrals.removeAll()
+            inactiveCentrals.removeAll()
+            keyboardBuffer.clear()
+            cachedReports[ReportID.keyboard.rawValue] = KeyboardReport.zero.data
             isAdvertising = false
         }
     }
@@ -483,6 +525,8 @@ extension HIDPeripheral: @preconcurrency CBPeripheralManagerDelegate {
         central: CBCentral,
         didSubscribeTo characteristic: CBCharacteristic
     ) {
+        keyboardBuffer.clear()
+        cachedReports[ReportID.keyboard.rawValue] = KeyboardReport.zero.data
         _trackInteraction(from: central)
         subscribedCentrals[central.identifier, default: []].insert(characteristic.uuid)
         _trace("subscribe: \(central.identifier) -> \(characteristic.uuid)")
@@ -505,6 +549,8 @@ extension HIDPeripheral: @preconcurrency CBPeripheralManagerDelegate {
         central: CBCentral,
         didUnsubscribeFrom characteristic: CBCharacteristic
     ) {
+        keyboardBuffer.clear()
+        cachedReports[ReportID.keyboard.rawValue] = KeyboardReport.zero.data
         _trace("unsubscribe: \(central.identifier) <- \(characteristic.uuid)")
         guard var chars = subscribedCentrals[central.identifier] else { return }
         chars.remove(characteristic.uuid)
@@ -521,7 +567,8 @@ extension HIDPeripheral: @preconcurrency CBPeripheralManagerDelegate {
 
     func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
         isReadyToSendNotification = true
-        drainPendingBroadcast()
+        drainKeyboardReports()
+        if isReadyToSendNotification { drainPendingBroadcast() }
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {

@@ -6,6 +6,7 @@ struct ContentView: View {
     @Environment(\.hid) private var hid
     #if os(macOS)
         @EnvironmentObject private var directInput: DirectInputController
+        @EnvironmentObject private var shortcuts: DirectInputShortcutManager
     #else
         @StateObject private var directInput = DirectInputController()
     #endif
@@ -40,7 +41,8 @@ struct ContentView: View {
         #endif
             .onChange(of: hid.isConnected) { connected in
                 #if os(macOS)
-                    guard connected else { directInput.stop(); return }
+                    shortcuts.connectionChanged(connected)
+                    guard connected else { return }
                     if !directInput.isCapturing { showConnectPrompt = true }
                 #else
                     guard connected else { return }
@@ -60,6 +62,13 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showGuide) { guideSheet }
         #if os(macOS)
+            .safeAreaInset(edge: .top) { keyboardStatus }
+            .onChange(of: hid.isActive) { active in
+                if !active { shortcuts.connectionChanged(false) }
+            }
+            .onChange(of: hid.activeError) { error in
+                if error != nil { directInput.stop() }
+            }
             .onDisappear { directInput.stop() }
             .frame(minWidth: 480, idealWidth: 560, minHeight: 640, idealHeight: 800)
             .onChange(of: directInput.needsAccessibility) { needs in
@@ -83,6 +92,37 @@ struct ContentView: View {
             }
         #endif
     }
+
+    #if os(macOS)
+        private var keyboardStatus: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(LocalizedStringKey(hid.isConnected ? "keyboard_only.connected" : "keyboard_only.disconnected"))
+                    Spacer()
+                    Text(LocalizedStringKey(directInput.isCapturing ? "keyboard_only.target_remote" : "keyboard_only.target_mac"))
+                        .fontWeight(.semibold)
+                }
+                HStack {
+                    Button(LocalizedStringKey(directInput.isCapturing ? "keyboard_only.stop" : "keyboard_only.start")) {
+                        shortcuts.toggle()
+                    }
+                    .disabled(!hid.isConnected && !directInput.isCapturing)
+                    Spacer()
+                    Text(verbatim: shortcuts.hotkey?.displayString ?? String(localized: "shortcut.none"))
+                        .font(.caption)
+                }
+                Text("keyboard_only.pointer_hint").font(.caption)
+                DisclosureGroup("keyboard_only.caps_title") {
+                    Text("keyboard_only.caps_help").font(.caption)
+                }
+                if let error = directInput.lastError ?? shortcuts.lastError {
+                    Text(verbatim: error).font(.caption).foregroundColor(.red)
+                }
+            }
+            .padding(12)
+            .background(.bar)
+        }
+    #endif
 
     private func _onAppear() {
         if !hasSeenWelcome {
